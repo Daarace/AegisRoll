@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-surface text-oxford-800 antialiased font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, .font-academic-heading {
+    @apply font-serif tracking-tight text-oxford-800;
+  }
+}
+
+/* Custom styles for academic badges, pulse radar, and smooth transitions */
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(38, 185, 168, 0.5);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 16px rgba(38, 185, 168, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(38, 185, 168, 0);
+  }
+}
+
+.animate-radar {
+  animation: radar-pulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+/* Print styles for export / presentation */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

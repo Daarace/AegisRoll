@@ -1,0 +1,2253 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  ShieldAlert,
+  FileSpreadsheet,
+  FileText,
+  FileCode,
+  Plus,
+  Upload,
+  Search,
+  Filter,
+  Download,
+  Building2,
+  BookOpen,
+  GraduationCap,
+  Users,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  Trash2,
+  UserCheck,
+  UserMinus,
+  UserPlus,
+  Sparkles,
+  X,
+  Check,
+  Calendar,
+  Clock,
+  MapPin,
+  Smartphone,
+  Navigation,
+  Radio,
+  KeyRound,
+  Bell,
+  RefreshCw,
+  Edit3,
+  Play,
+  Square,
+  Maximize2,
+  Camera,
+  QrCode,
+  CreditCard,
+  ScanLine
+} from 'lucide-react';
+import Papa from 'papaparse';
+import {
+  UserProfile,
+  Department,
+  Course,
+  Student,
+  Enrollment,
+  ClassSchedule,
+  ClassSession,
+  AttendanceLog,
+  AttendanceReportSummary,
+  AttendanceStatus
+} from '../types';
+import { aegisStore, subscribeToSessionAttendance } from '../lib/supabase';
+import { exportAttendanceToCSV, exportAttendanceToPDF, exportAttendanceToWord } from '../lib/exporters';
+import { getHighAccuracyLocation, GeoErrorResult } from '../lib/geolocation';
+import { GpsPermissionModal } from '../components/GpsPermissionModal';
+import { QrCameraScannerModal } from '../components/QrCameraScannerModal';
+import { SessionQrProjectorModal } from '../components/SessionQrProjectorModal';
+import { StudentQrPassModal } from '../components/StudentQrPassModal';
+import { BindIdCardModal } from '../components/BindIdCardModal';
+
+interface AdminDashboardProps {
+  currentUser: UserProfile;
+}
+
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) => {
+  const [activeTab, setActiveTab] = useState<'schedules' | 'live_session' | 'courses' | 'students' | 'reports'>('schedules');
+
+  // Filter States for Reporting Engine
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [selectedDeptId, setSelectedDeptId] = useState<string>('');
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Course Management Modals & States
+  const [showAddCourseModal, setShowAddCourseModal] = useState(false);
+  const [newCourseCode, setNewCourseCode] = useState('');
+  const [newCourseTitle, setNewCourseTitle] = useState('');
+  const [newCourseCredits, setNewCourseCredits] = useState(3);
+  const [newCourseDeptId, setNewCourseDeptId] = useState(aegisStore.departments[0]?.id || '');
+  const [newCourseLecturerId, setNewCourseLecturerId] = useState(
+    aegisStore.users.find((u) => u.role === 'lecturer')?.id || ''
+  );
+  const [newCourseSemester, setNewCourseSemester] = useState('First Semester');
+  const [newCourseAcademicYear, setNewCourseAcademicYear] = useState('2026/2027');
+  const [autoEnrollDeptStudents, setAutoEnrollDeptStudents] = useState(true);
+
+  // Class Schedule Modals & States
+  const [showAddScheduleModal, setShowAddScheduleModal] = useState(false);
+  const [schedCourseId, setSchedCourseId] = useState(aegisStore.courses[0]?.id || '');
+  const [schedDay, setSchedDay] = useState<'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday'>('Monday');
+  const [schedStartTime, setSchedStartTime] = useState('09:00');
+  const [schedEndTime, setSchedEndTime] = useState('11:00');
+  const [schedVenue, setSchedVenue] = useState('Engineering Amphitheatre A');
+
+  // Start Session Modal / State (with Custom PIN & Venue)
+  const [showStartSessionModal, setShowStartSessionModal] = useState(false);
+  const [sessionCourseId, setSessionCourseId] = useState(aegisStore.courses[0]?.id || '');
+  const [sessionCustomPin, setSessionCustomPin] = useState('');
+  const [sessionRadius, setSessionRadius] = useState<number>(75);
+  const [sessionVenue, setSessionVenue] = useState('Engineering Amphitheatre A');
+  const [sessionAnnouncement, setSessionAnnouncement] = useState('Attendance check-in is now active. Please remain seated.');
+  const [sessionAutoCloseMins, setSessionAutoCloseMins] = useState(30);
+  const [isStartingSession, setIsStartingSession] = useState(false);
+  const [geoError, setGeoError] = useState<GeoErrorResult | null>(null);
+
+  // Manual Mark Attendance (Fail-Safe) Modal State
+  const [showManualMarkModal, setShowManualMarkModal] = useState(false);
+  const [manualStudentId, setManualStudentId] = useState('');
+  const [manualStatus, setManualStatus] = useState<AttendanceStatus>('Present');
+  const [manualReason, setManualReason] = useState('Student phone battery depleted - physically verified in class');
+  const [manualSearchQuery, setManualSearchQuery] = useState('');
+
+  // Edit PIN Modal State
+  const [showEditPinModal, setShowEditPinModal] = useState(false);
+  const [updatedPin, setUpdatedPin] = useState('');
+
+  // Broadcast Announcement Modal State
+  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const [broadcastText, setBroadcastText] = useState('');
+
+  // Dedicated "Manage Students Offering Course" Modal State
+  const [managingCourse, setManagingCourse] = useState<Course | null>(null);
+  const [selectedStudentToEnroll, setSelectedStudentToEnroll] = useState<string>('');
+  const [courseStudentSearch, setCourseStudentSearch] = useState<string>('');
+
+  // Student CRUD Modals & States
+  const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentEmail, setNewStudentEmail] = useState('');
+  const [newStudentMatric, setNewStudentMatric] = useState('');
+  const [newStudentDeptId, setNewStudentDeptId] = useState(aegisStore.departments[0]?.id || '');
+  const [selectedCoursesForNewStudent, setSelectedCoursesForNewStudent] = useState<string[]>([]);
+
+  // Large Projection Modal
+  const [showProjectionModal, setShowProjectionModal] = useState(false);
+
+  // Backup QR Code & ID Card Modals
+  const [showQrScannerModal, setShowQrScannerModal] = useState(false);
+  const [showSessionQrModal, setShowSessionQrModal] = useState(false);
+  const [selectedStudentForQrModal, setSelectedStudentForQrModal] = useState<Student | null>(null);
+  const [selectedStudentForBindModal, setSelectedStudentForBindModal] = useState<Student | null>(null);
+  const [newStudentCustomQr, setNewStudentCustomQr] = useState<string>('');
+
+  // Reactive Tick for immediate re-render
+  const [tick, setTick] = useState(0);
+  const triggerUpdate = () => setTick((t) => t + 1);
+
+  // Find active session
+  const activeSession = aegisStore.sessions.find((s) => s.is_active);
+
+  // Subscribe to real-time events for active session
+  useEffect(() => {
+    if (!activeSession) return;
+    const unsub = subscribeToSessionAttendance(activeSession.id, () => {
+      triggerUpdate();
+    });
+    return () => unsub();
+  }, [activeSession?.id]);
+
+  // Compute Reporting Data
+  const reportData = useMemo(() => {
+    return aegisStore.getAttendanceReport({
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      departmentId: selectedDeptId || undefined,
+      courseId: selectedCourseId || undefined
+    });
+  }, [startDate, endDate, selectedDeptId, selectedCourseId, tick, aegisStore.enrollments.length]);
+
+  // Filter reporting data by search
+  const filteredReport = useMemo(() => {
+    if (!searchQuery.trim()) return reportData;
+    const q = searchQuery.toLowerCase();
+    return reportData.filter(
+      (r) =>
+        r.matric_number.toLowerCase().includes(q) ||
+        r.student_name.toLowerCase().includes(q) ||
+        r.course_code.toLowerCase().includes(q)
+    );
+  }, [reportData, searchQuery]);
+
+  // Aggregate Metrics for Reporting
+  const totalAuditedStudents = filteredReport.length;
+  const avgAttendance =
+    filteredReport.length > 0
+      ? (
+          filteredReport.reduce((acc, curr) => acc + curr.attendance_percentage, 0) /
+          filteredReport.length
+        ).toFixed(1)
+      : '0.0';
+  const flaggedCount = filteredReport.filter((r) => r.attendance_percentage < 75).length;
+
+  // Export handlers
+  const currentFilterMeta = {
+    courseCode: aegisStore.courses.find((c) => c.id === selectedCourseId)?.course_code,
+    courseTitle: aegisStore.courses.find((c) => c.id === selectedCourseId)?.title,
+    departmentName: aegisStore.departments.find((d) => d.id === selectedDeptId)?.name,
+    startDate,
+    endDate
+  };
+
+  const handleExportCSV = () => {
+    exportAttendanceToCSV(filteredReport, 'AegisRoll_Class_Attendance_Report.csv');
+  };
+
+  const handleExportPDF = () => {
+    exportAttendanceToPDF(filteredReport, currentFilterMeta, 'AegisRoll_Official_Attendance_Audit.pdf');
+  };
+
+  const handleExportWord = () => {
+    exportAttendanceToWord(filteredReport, currentFilterMeta, 'AegisRoll_Official_Attendance_Audit.docx');
+  };
+
+  // --- SCHEDULE ACTIONS ---
+
+  const handleCreateSchedule = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!schedCourseId || !schedVenue) return;
+    aegisStore.createSchedule({
+      course_id: schedCourseId,
+      day_of_week: schedDay,
+      start_time: schedStartTime,
+      end_time: schedEndTime,
+      venue: schedVenue.trim(),
+      created_by: currentUser.id
+    });
+    setShowAddScheduleModal(false);
+    triggerUpdate();
+  };
+
+  const handleDeleteSchedule = (schedId: string) => {
+    if (confirm('Delete this scheduled class timetable entry?')) {
+      aegisStore.deleteSchedule(schedId);
+      triggerUpdate();
+    }
+  };
+
+  const handleStartSessionFromSchedule = (schedule: ClassSchedule) => {
+    setSessionCourseId(schedule.course_id);
+    setSessionVenue(schedule.venue);
+    setSessionCustomPin(Math.floor(1000 + Math.random() * 9000).toString());
+    setShowStartSessionModal(true);
+  };
+
+  // --- SESSION CONTROLS & GEOFENCE RECALIBRATION ---
+
+  const handleLaunchSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sessionCourseId) return;
+
+    setIsStartingSession(true);
+    let lat = 40.712776;
+    let lon = -74.005974;
+
+    try {
+      const pos = await getHighAccuracyLocation();
+      lat = pos.latitude;
+      lon = pos.longitude;
+    } catch (err: any) {
+      console.warn("Using CR's classroom reference GPS anchor:", err);
+    }
+
+    const pinToUse =
+      sessionCustomPin && sessionCustomPin.trim().length === 4
+        ? sessionCustomPin.trim()
+        : Math.floor(1000 + Math.random() * 9000).toString();
+
+    aegisStore.createSession({
+      course_id: sessionCourseId,
+      lecturer_id: currentUser.id, // Class Rep anchors the session
+      admin_lat: lat,
+      admin_lon: lon,
+      geofence_radius_meters: sessionRadius,
+      custom_pin: pinToUse,
+      venue: sessionVenue,
+      announcement: sessionAnnouncement,
+      auto_close_minutes: sessionAutoCloseMins,
+      anchor_device_name: "Course Representative's Phone"
+    });
+
+    setIsStartingSession(false);
+    setShowStartSessionModal(false);
+    setActiveTab('live_session');
+    setShowProjectionModal(true);
+    triggerUpdate();
+  };
+
+  const handleRecalibrateAnchor = async () => {
+    if (!activeSession) return;
+    try {
+      const pos = await getHighAccuracyLocation();
+      aegisStore.recalibrateSessionAnchor(
+        activeSession.id,
+        pos.latitude,
+        pos.longitude,
+        "Course Representative's Phone (Recalibrated)"
+      );
+      alert(`Geofence successfully recalibrated to your phone's live GPS coordinates! (${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)})`);
+      triggerUpdate();
+    } catch (err: any) {
+      alert("Unable to fetch phone GPS: " + (err.message || 'Please enable location permissions.'));
+    }
+  };
+
+  const handleUpdatePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession || updatedPin.trim().length !== 4) return;
+    aegisStore.updateSessionPin(activeSession.id, updatedPin.trim());
+    setShowEditPinModal(false);
+    setUpdatedPin('');
+    triggerUpdate();
+  };
+
+  const handleBroadcastAnnouncement = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession) return;
+    aegisStore.setSessionAnnouncement(activeSession.id, broadcastText);
+    setShowAnnouncementModal(false);
+    setBroadcastText('');
+    triggerUpdate();
+  };
+
+  const handleEndLiveSession = () => {
+    if (!activeSession) return;
+    if (confirm('Conclude active class attendance session? Students will no longer be able to check in.')) {
+      aegisStore.endSession(activeSession.id);
+      triggerUpdate();
+    }
+  };
+
+  // --- MANUAL ATTENDANCE (FAIL-SAFE) ---
+
+  const handleManualMarkSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession || !manualStudentId) return;
+    aegisStore.manuallyMarkAttendance(
+      activeSession.id,
+      manualStudentId,
+      manualStatus,
+      manualReason.trim() || 'Manual sign-in authorized by Class Representative',
+      'Course Representative (Fail-Safe)'
+    );
+    setShowManualMarkModal(false);
+    setManualStudentId('');
+    setManualReason('Student phone battery depleted - physically verified in class');
+    triggerUpdate();
+  };
+
+  // --- COURSE CRUD ACTIONS ---
+
+  const handleCreateCourse = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCourseCode || !newCourseTitle) return;
+
+    const newCourse: Course = {
+      id: 'crs-' + Math.random().toString(36).substring(2, 9),
+      course_code: newCourseCode.trim().toUpperCase(),
+      title: newCourseTitle.trim(),
+      credit_load: Number(newCourseCredits) || 3,
+      department_id: newCourseDeptId,
+      lecturer_id: newCourseLecturerId || aegisStore.users.find((u) => u.role === 'lecturer')?.id
+    };
+
+    aegisStore.courses.push(newCourse);
+
+    if (autoEnrollDeptStudents) {
+      const deptStudents = aegisStore.students.filter((s) => s.department_id === newCourseDeptId);
+      deptStudents.forEach((st) => {
+        aegisStore.enrollments.push({
+          id: 'enr-' + Math.random().toString(36).substring(2, 9),
+          student_id: st.id,
+          course_id: newCourse.id,
+          semester: newCourseSemester,
+          academic_year: newCourseAcademicYear
+        });
+      });
+    }
+
+    aegisStore.save();
+    setNewCourseCode('');
+    setNewCourseTitle('');
+    setNewCourseCredits(3);
+    setShowAddCourseModal(false);
+    triggerUpdate();
+  };
+
+  const handleDeleteCourse = (courseId: string, courseCode: string) => {
+    if (confirm(`Are you sure you want to delete course ${courseCode}? All associated enrollments will also be removed.`)) {
+      aegisStore.courses = aegisStore.courses.filter((c) => c.id !== courseId);
+      aegisStore.enrollments = aegisStore.enrollments.filter((e) => e.course_id !== courseId);
+      aegisStore.schedules = aegisStore.schedules.filter((s) => s.course_id !== courseId);
+      aegisStore.save();
+      triggerUpdate();
+    }
+  };
+
+  // --- ENROLLED STUDENTS IN COURSE ---
+
+  const enrolledStudentsInManagingCourse = useMemo(() => {
+    if (!managingCourse) return [];
+    return aegisStore.enrollments
+      .filter((e) => e.course_id === managingCourse.id)
+      .map((e) => {
+        const student = aegisStore.students.find((s) => s.id === e.student_id);
+        const user = student ? aegisStore.users.find((u) => u.id === student.user_id) : null;
+        const dept = student ? aegisStore.departments.find((d) => d.id === student.department_id) : null;
+
+        const courseSessions = aegisStore.sessions.filter((s) => s.course_id === managingCourse.id);
+        const total = courseSessions.length;
+        const sessionIds = new Set(courseSessions.map((s) => s.id));
+        const attended = student
+          ? aegisStore.logs.filter((l) => sessionIds.has(l.session_id) && l.student_id === student.id && l.status === 'Present').length
+          : 0;
+        const rate = total > 0 ? (attended / total) * 100 : 100;
+
+        return {
+          enrollmentId: e.id,
+          student,
+          user,
+          dept,
+          totalSessions: total,
+          attendedSessions: attended,
+          attendanceRate: rate
+        };
+      })
+      .filter((item) => Boolean(item.student));
+  }, [managingCourse, tick, aegisStore.enrollments.length]);
+
+  const eligibleStudentsForManagingCourse = useMemo(() => {
+    if (!managingCourse) return [];
+    const enrolledIds = new Set(
+      aegisStore.enrollments
+        .filter((e) => e.course_id === managingCourse.id)
+        .map((e) => e.student_id)
+    );
+
+    return aegisStore.students
+      .filter((st) => !enrolledIds.has(st.id))
+      .map((st) => {
+        const user = aegisStore.users.find((u) => u.id === st.user_id);
+        const dept = aegisStore.departments.find((d) => d.id === st.department_id);
+        return { student: st, user, dept };
+      });
+  }, [managingCourse, tick, aegisStore.enrollments.length]);
+
+  const filteredEnrolledStudents = useMemo(() => {
+    if (!courseStudentSearch.trim()) return enrolledStudentsInManagingCourse;
+    const q = courseStudentSearch.toLowerCase();
+    return enrolledStudentsInManagingCourse.filter(
+      (item) =>
+        item.student?.matric_number.toLowerCase().includes(q) ||
+        item.user?.full_name.toLowerCase().includes(q)
+    );
+  }, [enrolledStudentsInManagingCourse, courseStudentSearch]);
+
+  const handleEnrollStudentInManagingCourse = () => {
+    if (!managingCourse || !selectedStudentToEnroll) return;
+    const res = aegisStore.enrollStudentInCourse(selectedStudentToEnroll, managingCourse.id);
+    if (res.success) {
+      setSelectedStudentToEnroll('');
+      triggerUpdate();
+    } else {
+      alert(res.message);
+    }
+  };
+
+  const handleUnenrollStudentFromManagingCourse = (studentId: string, matricNo: string) => {
+    if (!managingCourse) return;
+    if (confirm(`Remove student (${matricNo}) from offering ${managingCourse.course_code}?`)) {
+      aegisStore.unenrollStudentFromCourse(studentId, managingCourse.id);
+      triggerUpdate();
+    }
+  };
+
+  // --- STUDENT CRUD ACTIONS ---
+
+  const handleCreateStudent = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStudentName || !newStudentEmail || !newStudentMatric) return;
+
+    const existingMatric = aegisStore.students.find(
+      (s) => s.matric_number.toUpperCase() === newStudentMatric.trim().toUpperCase()
+    );
+    if (existingMatric) {
+      alert(`Student with matriculation number ${newStudentMatric} already exists.`);
+      return;
+    }
+
+    const newUser: UserProfile = {
+      id: 'usr-' + Math.random().toString(36).substring(2, 9),
+      email: newStudentEmail.trim(),
+      full_name: newStudentName.trim(),
+      role: 'student'
+    };
+    aegisStore.users.push(newUser);
+
+    const cleanMatric = newStudentMatric.trim().toUpperCase();
+    const qrToUse = newStudentCustomQr.trim() || ('AR-QR-' + cleanMatric.replace(/[^A-Za-z0-9]/g, ''));
+    const newStd: Student = {
+      id: 'std-' + Math.random().toString(36).substring(2, 9),
+      user_id: newUser.id,
+      matric_number: cleanMatric,
+      department_id: newStudentDeptId,
+      qr_code_id: qrToUse
+    };
+    aegisStore.students.push(newStd);
+
+    selectedCoursesForNewStudent.forEach((courseId) => {
+      aegisStore.enrollments.push({
+        id: 'enr-' + Math.random().toString(36).substring(2, 9),
+        student_id: newStd.id,
+        course_id: courseId,
+        semester: 'First Semester',
+        academic_year: '2026/2027'
+      });
+    });
+
+    aegisStore.save();
+    setNewStudentName('');
+    setNewStudentEmail('');
+    setNewStudentMatric('');
+    setNewStudentCustomQr('');
+    setSelectedCoursesForNewStudent([]);
+    setShowAddStudentModal(false);
+    triggerUpdate();
+  };
+
+  // Students eligible for manual mark-in in active session
+  const activeCourse = activeSession ? aegisStore.courses.find((c) => c.id === activeSession.course_id) : null;
+  const activeSessionLogs = activeSession ? aegisStore.logs.filter((l) => l.session_id === activeSession.id) : [];
+
+  const studentsEligibleForManualMark = useMemo(() => {
+    if (!activeSession) return [];
+    const courseEnrollments = aegisStore.enrollments.filter((e) => e.course_id === activeSession.course_id);
+    const enrolledStudents = courseEnrollments.map((e) => {
+      const student = aegisStore.students.find((s) => s.id === e.student_id);
+      const user = student ? aegisStore.users.find((u) => u.id === student.user_id) : null;
+      const log = activeSessionLogs.find((l) => l.student_id === student?.id);
+      return { student, user, log };
+    }).filter((item) => Boolean(item.student));
+
+    if (!manualSearchQuery.trim()) return enrolledStudents;
+    const q = manualSearchQuery.toLowerCase();
+    return enrolledStudents.filter(
+      (item) =>
+        item.student?.matric_number.toLowerCase().includes(q) ||
+        item.user?.full_name.toLowerCase().includes(q)
+    );
+  }, [activeSession, activeSessionLogs, manualSearchQuery, tick]);
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      {/* 1. Header Banner */}
+      <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-oxford-800 text-teal-brand border border-teal-brand/30 flex items-center justify-center text-xl font-bold font-serif shadow-inner">
+            <ShieldAlert className="w-7 h-7 text-teal-brand" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="font-serif text-2xl font-bold text-oxford-800">
+                Course Representative Administration & Geofence Hub
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-teal-brand/10 text-teal-dark border border-teal-brand/30">
+                Course Rep (Admin)
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Class timetables, mobile geofence anchoring, manual attendance fail-safes, and course roster controls
+            </p>
+          </div>
+        </div>
+
+        {/* Global Reset */}
+        <button
+          onClick={() => {
+            if (confirm('Reset entire system database to initial seeded demonstration records?')) {
+              aegisStore.resetToDefaults();
+              window.location.reload();
+            }
+          }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-600 hover:text-oxford-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+        >
+          <RotateCcw className="w-3.5 h-3.5" /> Reset Demo Records
+        </button>
+      </div>
+
+      {/* 2. Top Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-surface-border pb-1 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('schedules')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'schedules'
+              ? 'border-teal-brand text-teal-dark bg-teal-brand/10'
+              : 'border-transparent text-slate-500 hover:text-oxford-800'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Class Schedules & Timetable ({aegisStore.schedules.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('live_session')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'live_session'
+              ? 'border-teal-brand text-teal-dark bg-teal-brand/10'
+              : 'border-transparent text-slate-500 hover:text-oxford-800'
+          }`}
+        >
+          <Radio className="w-4 h-4 text-teal-brand animate-pulse" />
+          <span>Live Session Proctor & Fail-Safe {activeSession && '(Active)'}</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('courses')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'courses'
+              ? 'border-teal-brand text-teal-dark bg-teal-brand/10'
+              : 'border-transparent text-slate-500 hover:text-oxford-800'
+          }`}
+        >
+          <BookOpen className="w-4 h-4" />
+          <span>Course Catalog & Offerings ({aegisStore.courses.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('students')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'students'
+              ? 'border-teal-brand text-teal-dark bg-teal-brand/10'
+              : 'border-transparent text-slate-500 hover:text-oxford-800'
+          }`}
+        >
+          <GraduationCap className="w-4 h-4" />
+          <span>Student Roster ({aegisStore.students.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('reports')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'reports'
+              ? 'border-teal-brand text-teal-dark bg-teal-brand/10'
+              : 'border-transparent text-slate-500 hover:text-oxford-800'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Attendance Audits & Exports</span>
+        </button>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* TAB 1: CLASS SCHEDULES & TIMETABLE                                        */}
+      {/* ========================================================================= */}
+      {activeTab === 'schedules' && (
+        <div className="space-y-6">
+          <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-surface-border">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-oxford-800 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-teal-brand" />
+                  Academic Class Timetable & Schedule Initiator
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Manage recurring class times and days. Launch live attendance directly from any scheduled class with your phone as the GPS anchor.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowAddScheduleModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center gap-2 shadow-sm shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Add Class Schedule
+              </button>
+            </div>
+
+            {/* Timetable Grid Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+              {aegisStore.schedules.map((schedule) => {
+                const course = aegisStore.courses.find((c) => c.id === schedule.course_id);
+                const enrolledCount = aegisStore.enrollments.filter((e) => e.course_id === schedule.course_id).length;
+                const isSessionActiveForCourse = activeSession && activeSession.course_id === schedule.course_id;
+
+                return (
+                  <div
+                    key={schedule.id}
+                    className="p-5 rounded-2xl border border-surface-border bg-slate-50/50 hover:bg-white hover:shadow-academic transition-all flex flex-col justify-between space-y-4"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-oxford-800 text-gold-brand font-mono">
+                          {schedule.day_of_week}
+                        </span>
+                        <span className="text-xs font-mono font-semibold text-slate-500 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-teal-brand" />
+                          {schedule.start_time} - {schedule.end_time}
+                        </span>
+                      </div>
+
+                      <div className="mt-3">
+                        <h4 className="font-bold text-base text-oxford-800 font-mono">
+                          {course?.course_code}
+                        </h4>
+                        <p className="text-xs text-slate-600 line-clamp-1 mt-0.5 font-medium">
+                          {course?.title}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+                        <MapPin className="w-3.5 h-3.5 text-teal-brand shrink-0" />
+                        <span className="font-medium text-slate-700 truncate">{schedule.venue}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-1">
+                        {enrolledCount} Students Enrolled Offering This Course
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-200/80 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => handleDeleteSchedule(schedule.id)}
+                        className="p-2 text-slate-400 hover:text-red-600 rounded-lg transition-colors"
+                        title="Delete schedule"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+
+                      {isSessionActiveForCourse ? (
+                        <button
+                          onClick={() => setActiveTab('live_session')}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                        >
+                          <Radio className="w-3.5 h-3.5 animate-ping" />
+                          <span>Session In Progress</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleStartSessionFromSchedule(schedule)}
+                          className="px-3.5 py-1.5 rounded-xl bg-oxford-800 hover:bg-oxford-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-colors"
+                        >
+                          <Play className="w-3.5 h-3.5 text-teal-brand fill-teal-brand" />
+                          <span>Start Attendance Session</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: LIVE GEOFENCE SESSION PROCTOR & FAIL-SAFE                          */}
+      {/* ========================================================================= */}
+      {activeTab === 'live_session' && (
+        <div className="space-y-6">
+          {!activeSession ? (
+            <div className="bg-surface-card rounded-2xl p-10 text-center shadow-academic border border-surface-border space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-oxford-800 text-teal-brand flex items-center justify-center mx-auto shadow-md">
+                <Radio className="w-8 h-8" />
+              </div>
+              <h3 className="font-serif text-2xl font-bold text-oxford-800">
+                No Active Class Attendance Session
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Launch an ad-hoc session or start attendance directly from your timetable schedules. 
+                Your smartphone's GPS will act as the dynamic geofence anchor for the classroom.
+              </p>
+              <button
+                onClick={() => {
+                  setSessionCustomPin(Math.floor(1000 + Math.random() * 9000).toString());
+                  setShowStartSessionModal(true);
+                }}
+                className="px-6 py-3 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors shadow-academic inline-flex items-center gap-2"
+              >
+                <Play className="w-4 h-4 fill-oxford-900" />
+                <span>Launch Dynamic Geofenced Session</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Session Control Toolbar */}
+              <div className="bg-oxford-800 text-white rounded-2xl p-6 shadow-academic-lg border border-oxford-700 space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full bg-teal-brand animate-ping" />
+                      <span className="font-mono text-xl font-extrabold text-teal-brand">
+                        {activeCourse?.course_code}
+                      </span>
+                      <span className="text-lg font-serif font-bold text-white">
+                        • {activeCourse?.title}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 flex flex-wrap items-center gap-3">
+                      <span>Venue: <strong>{activeSession.venue || 'Lecture Hall'}</strong></span>
+                      <span>•</span>
+                      <span>Perimeter: <strong>{activeSession.geofence_radius_meters}m</strong></span>
+                      <span>•</span>
+                      <span>Anchor: <strong className="text-gold-brand">{activeSession.anchor_device_name || "CR's Phone"}</strong></span>
+                    </p>
+                  </div>
+
+                  {/* Big PIN Display & Buttons */}
+                  <div className="flex items-center gap-3">
+                    <div className="bg-oxford-900 border border-teal-brand/40 px-4 py-2 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400 block">
+                        Session PIN
+                      </span>
+                      <span className="font-mono text-2xl font-black tracking-widest text-gold-brand">
+                        {activeSession.session_pin}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => setShowProjectionModal(true)}
+                      className="p-2.5 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-teal-brand"
+                      title="Project Large PIN in Class"
+                    >
+                      <Maximize2 className="w-5 h-5" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setUpdatedPin(activeSession.session_pin);
+                        setShowEditPinModal(true);
+                      }}
+                      className="p-2.5 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-white"
+                      title="Set Custom PIN for Session"
+                    >
+                      <Edit3 className="w-5 h-5" />
+                    </button>
+
+                    <button
+                      onClick={handleEndLiveSession}
+                      className="px-3.5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Square className="w-4 h-4" /> End
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fail-Safe Control Strip: Recalibrate GPS Anchor & Manual Mark In */}
+                <div className="pt-3 border-t border-oxford-700 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* CR Phone GPS Recalibration Fail-Safe Button */}
+                    <button
+                      onClick={handleRecalibrateAnchor}
+                      className="px-3.5 py-2 rounded-xl bg-teal-brand/20 hover:bg-teal-brand/30 border border-teal-brand/40 text-teal-brand font-bold flex items-center gap-1.5 transition-colors"
+                      title="Use live phone location if class moved rooms"
+                    >
+                      <Navigation className="w-4 h-4" />
+                      <span>Recalibrate Geofence to My Live Phone Location</span>
+                    </button>
+
+                    {/* QR Code Offline Backup Buttons */}
+                    <button
+                      onClick={() => setShowQrScannerModal(true)}
+                      className="px-3.5 py-2 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                      title="Scan student QR passes with phone camera without requiring student GPS"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>Scan Student QR Badges</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowSessionQrModal(true)}
+                      className="px-3 py-2 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-teal-brand font-semibold flex items-center gap-1.5 transition-colors"
+                      title="Project backup QR code for students to scan"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>Project Backup QR</span>
+                    </button>
+
+                    {/* Announcement Broadcast */}
+                    <button
+                      onClick={() => {
+                        setBroadcastText(activeSession.announcement || '');
+                        setShowAnnouncementModal(true);
+                      }}
+                      className="px-3 py-2 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Bell className="w-4 h-4 text-gold-brand" />
+                      <span>Broadcast Class Notice</span>
+                    </button>
+                  </div>
+
+                  {/* Manual Mark In (Fail-Safe) Button */}
+                  <button
+                    onClick={() => {
+                      setManualStudentId('');
+                      setShowManualMarkModal(true);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-gold-brand hover:bg-gold-light text-oxford-900 font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <UserPlus className="w-4 h-4 text-oxford-900" />
+                    <span>Manual Mark-In (Fail-Safe for Dead Battery / Glitches)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Real-time Roster & Distance Telemetry from CR's Phone */}
+              <div className="bg-surface-card rounded-2xl shadow-academic border border-surface-border overflow-hidden">
+                <div className="p-5 border-b border-surface-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-oxford-800 flex items-center gap-2">
+                      <Radio className="w-4 h-4 text-teal-brand animate-pulse" />
+                      Enrolled Student Presence & CR Phone Distance Telemetry
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Physical presence quantified by terrestrial distance from <strong>Course Representative's Phone</strong>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                      {activeSessionLogs.filter((l) => l.status === 'Present').length} Verified Present
+                    </span>
+                    <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+                      {activeSessionLogs.filter((l) => l.status === 'Flagged').length} Flagged
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-surface-border uppercase tracking-wider text-[11px]">
+                      <tr>
+                        <th className="py-3 px-4">Student</th>
+                        <th className="py-3 px-4">Matric No.</th>
+                        <th className="py-3 px-4">Check-In Time</th>
+                        <th className="py-3 px-4">Distance from CR Phone</th>
+                        <th className="py-3 px-4">Verification Source</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Quick Override</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-surface-border">
+                      {studentsEligibleForManualMark.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400">
+                            No enrolled students found for this course.
+                          </td>
+                        </tr>
+                      ) : (
+                        studentsEligibleForManualMark.map((item) => {
+                          const log = item.log;
+                          const hasCheckedIn = Boolean(log);
+                          const isPresent = log?.status === 'Present';
+                          const isManual = log?.marked_by && log.marked_by !== 'geofence_auto';
+
+                          return (
+                            <tr key={item.student!.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-3 px-4 font-semibold text-oxford-800">
+                                {item.user?.full_name || 'N/A'}
+                              </td>
+                              <td className="py-3 px-4 font-mono font-bold text-oxford-800">
+                                {item.student?.matric_number}
+                              </td>
+                              <td className="py-3 px-4 text-slate-500">
+                                {log ? new Date(log.checked_in_at).toLocaleTimeString() : 'Not Yet'}
+                              </td>
+                              <td className="py-3 px-4 font-mono font-bold">
+                                {log ? (
+                                  <span
+                                    className={
+                                      log.distance_calculated > activeSession.geofence_radius_meters
+                                        ? 'text-red-600'
+                                        : 'text-emerald-700'
+                                    }
+                                  >
+                                    {log.distance_calculated}m from CR
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-normal italic">Pending</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">
+                                {isManual ? (
+                                  <span className="text-gold-dark font-semibold">
+                                    Manual (Fail-Safe)
+                                  </span>
+                                ) : log ? (
+                                  <span>Automated Geofence</span>
+                                ) : (
+                                  <span className="text-slate-400">--</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4">
+                                {log ? (
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                                      isPresent
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                                    }`}
+                                  >
+                                    {isPresent ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                                    {log.status}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 italic">Unchecked</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {log?.status === 'Flagged' ? (
+                                    <button
+                                      onClick={() => aegisStore.overrideAttendanceStatus(log.id, 'Present')}
+                                      className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors"
+                                    >
+                                      Approve
+                                    </button>
+                                  ) : !log ? (
+                                    <button
+                                      onClick={() => {
+                                        setManualStudentId(item.student!.id);
+                                        setShowManualMarkModal(true);
+                                      }}
+                                      className="px-2.5 py-1 text-[11px] font-semibold text-oxford-800 bg-slate-100 hover:bg-teal-brand/20 rounded-lg transition-colors"
+                                    >
+                                      Mark Present
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => aegisStore.overrideAttendanceStatus(log.id, 'Flagged')}
+                                      className="px-2.5 py-1 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors"
+                                    >
+                                      Flag
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: COURSES & STUDENT ALLOCATIONS                                      */}
+      {/* ========================================================================= */}
+      {activeTab === 'courses' && (
+        <div className="space-y-6">
+          <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-surface-border">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-oxford-800 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-teal-brand" />
+                  Academic Course Catalog & Enrollments
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Click <strong className="text-oxford-800">"Manage Students"</strong> on any course to enroll, drop, or inspect students offering that course
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowAddCourseModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center gap-2 shadow-sm shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Add New Course
+              </button>
+            </div>
+
+            {/* Courses Table */}
+            <div className="overflow-x-auto mt-4">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-surface-border uppercase tracking-wider text-[11px]">
+                  <tr>
+                    <th className="py-3.5 px-4">Course Code</th>
+                    <th className="py-3.5 px-4">Course Title</th>
+                    <th className="py-3.5 px-4 text-center">Credit Load</th>
+                    <th className="py-3.5 px-4">Department</th>
+                    <th className="py-3.5 px-4">Assigned Lecturer</th>
+                    <th className="py-3.5 px-4 text-center">Students Offering</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-border">
+                  {aegisStore.courses.map((course) => {
+                    const dept = aegisStore.departments.find((d) => d.id === course.department_id);
+                    const lec = aegisStore.users.find((u) => u.id === course.lecturer_id);
+                    const enrolledCount = aegisStore.enrollments.filter((e) => e.course_id === course.id).length;
+
+                    return (
+                      <tr key={course.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3.5 px-4 font-mono font-bold text-sm text-oxford-800">
+                          {course.course_code}
+                        </td>
+                        <td className="py-3.5 px-4 font-medium text-oxford-800 max-w-xs">
+                          {course.title}
+                        </td>
+                        <td className="py-3.5 px-4 text-center font-mono">
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                            {course.credit_load} Units
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-600">
+                          {dept?.code} ({dept?.name.replace('Department of ', '')})
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-700 font-medium">
+                          {lec?.full_name || 'Dr. Gregory Adams'}
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <button
+                            onClick={() => {
+                              setManagingCourse(course);
+                              setSelectedStudentToEnroll('');
+                              setCourseStudentSearch('');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-brand/10 hover:bg-teal-brand/20 text-teal-dark border border-teal-brand/30 font-bold transition-all group"
+                          >
+                            <Users className="w-3.5 h-3.5 text-teal-brand group-hover:scale-110 transition-transform" />
+                            <span>{enrolledCount} Enrolled</span>
+                            <span className="text-[10px] uppercase font-semibold text-teal-brand ml-1">
+                              • Manage
+                            </span>
+                          </button>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                setManagingCourse(course);
+                                setSelectedStudentToEnroll('');
+                                setCourseStudentSearch('');
+                              }}
+                              className="px-2.5 py-1 text-xs font-semibold bg-oxford-800 hover:bg-oxford-700 text-white rounded-lg transition-colors flex items-center gap-1"
+                              title="Manage students offering this course"
+                            >
+                              <Users className="w-3 h-3 text-teal-brand" /> Manage
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCourse(course.id, course.course_code)}
+                              className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Course"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 4: STUDENT ROSTER                                                     */}
+      {/* ========================================================================= */}
+      {activeTab === 'students' && (
+        <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-surface-border">
+            <div>
+              <h3 className="font-serif text-lg font-bold text-oxford-800 flex items-center gap-2">
+                <GraduationCap className="w-5 h-5 text-teal-brand" />
+                Student Roster & Registered Hardware Tokens
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Register students, assign their course offerings, and track mobile device fingerprints
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => {
+                  if (aegisStore.students.length > 0) {
+                    setSelectedStudentForBindModal(aegisStore.students[0]);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-oxford-800 hover:bg-oxford-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+                title="Scan and bind physical plastic ID cards for students"
+              >
+                <CreditCard className="w-4 h-4 text-teal-brand" />
+                <span>Card Binding Station</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setSelectedCoursesForNewStudent(aegisStore.courses.map((c) => c.id));
+                  setShowAddStudentModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Add Student
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-surface-border uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th className="py-3 px-4">Matric Number</th>
+                  <th className="py-3 px-4">Student Name</th>
+                  <th className="py-3 px-4">Email</th>
+                  <th className="py-3 px-4">Department</th>
+                  <th className="py-3 px-4">Courses Offering</th>
+                  <th className="py-3 px-4">Unique QR Pass</th>
+                  <th className="py-3 px-4">Device Fingerprint</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-border">
+                {aegisStore.students.map((student) => {
+                  const user = aegisStore.users.find((u) => u.id === student.user_id);
+                  const dept = aegisStore.departments.find((d) => d.id === student.department_id);
+                  const studentEnrollments = aegisStore.enrollments.filter((e) => e.student_id === student.id);
+                  const enrolledCourses = studentEnrollments
+                    .map((e) => aegisStore.courses.find((c) => c.id === e.course_id)?.course_code)
+                    .filter(Boolean);
+
+                  return (
+                    <tr key={student.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-3 px-4 font-mono font-bold text-oxford-800">
+                        {student.matric_number}
+                      </td>
+                      <td className="py-3 px-4 font-medium text-oxford-800">
+                        {user?.full_name || 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
+                        {user?.email || 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 font-medium">
+                        {dept?.code || 'N/A'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {enrolledCourses.map((code, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-0.5 rounded bg-slate-100 text-oxford-800 font-mono font-semibold text-[10px]"
+                            >
+                              {code}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1.5">
+                          {student.qr_code_id && student.qr_code_id.length === 32 ? (
+                            <span
+                              className="font-mono text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300 flex items-center gap-1"
+                              title={`Physical ID Card Bound: ${student.qr_code_id}`}
+                            >
+                              <CreditCard className="w-3 h-3 text-emerald-600" />
+                              {student.qr_code_id.substring(0, 8)}... (32c)
+                            </span>
+                          ) : (
+                            <span className="font-mono text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 truncate max-w-[120px]">
+                              {student.qr_code_id || 'AR-QR-...'}
+                            </span>
+                          )}
+
+                          {/* Bind Physical Card Button */}
+                          <button
+                            onClick={() => setSelectedStudentForBindModal(student)}
+                            className="p-1.5 rounded-lg bg-teal-brand/10 hover:bg-teal-brand/20 text-teal-dark transition"
+                            title="Scan & Bind Student's Physical 32-character ID Card QR code"
+                          >
+                            <CreditCard className="w-3.5 h-3.5 text-teal-brand" />
+                          </button>
+
+                          {/* View Digital QR Pass */}
+                          <button
+                            onClick={() => setSelectedStudentForQrModal(student)}
+                            className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-oxford-800 transition"
+                            title="View & Print Digital QR Pass"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        {user?.device_fingerprint ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[10px]">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            {user.device_fingerprint.substring(0, 14)}...
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic text-[11px]">Not bound yet</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 5: ATTENDANCE AUDIT & MULTI-FORMAT EXPORTS                             */}
+      {/* ========================================================================= */}
+      {activeTab === 'reports' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-surface-card rounded-2xl p-5 shadow-academic border border-surface-border">
+              <span className="text-xs text-slate-500 font-medium">Audited Student Entries</span>
+              <div className="text-3xl font-extrabold font-mono text-oxford-800 mt-1">
+                {totalAuditedStudents}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Across all filtered course offerings</p>
+            </div>
+
+            <div className="bg-surface-card rounded-2xl p-5 shadow-academic border border-surface-border">
+              <span className="text-xs text-slate-500 font-medium">Class Attendance Average</span>
+              <div className="text-3xl font-extrabold font-mono text-teal-dark mt-1">
+                {avgAttendance}%
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Overall verification index</p>
+            </div>
+
+            <div className="bg-surface-card rounded-2xl p-5 shadow-academic border border-surface-border">
+              <span className="text-xs text-slate-500 font-medium">Below Attendance Threshold (&lt;75%)</span>
+              <div className="text-3xl font-extrabold font-mono text-red-600 mt-1">
+                {flaggedCount}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Ineligible for exam admission</p>
+            </div>
+          </div>
+
+          <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-teal-brand" />
+                <h3 className="font-serif text-base font-bold text-oxford-800">
+                  Customizable Audit Filters
+                </h3>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleExportCSV}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Export CSV</span>
+                </button>
+
+                <button
+                  onClick={handleExportPDF}
+                  className="px-3.5 py-2 rounded-xl bg-oxford-800 hover:bg-oxford-700 text-white font-bold text-xs transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  <FileText className="w-4 h-4 text-teal-brand" />
+                  <span>Export PDF Audit</span>
+                </button>
+
+                <button
+                  onClick={handleExportWord}
+                  className="px-3.5 py-2 rounded-xl bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  <FileCode className="w-4 h-4 text-blue-300" />
+                  <span>Export Word (.docx)</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Course</label>
+                <select
+                  value={selectedCourseId}
+                  onChange={(e) => setSelectedCourseId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-xs border border-surface-border rounded-lg bg-white"
+                >
+                  <option value="">All Courses</option>
+                  {aegisStore.courses.map((c) => (
+                    <option key={c.id} value={c.id}>{c.course_code} - {c.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Department</label>
+                <select
+                  value={selectedDeptId}
+                  onChange={(e) => setSelectedDeptId(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-xs border border-surface-border rounded-lg bg-white"
+                >
+                  <option value="">All Departments</option>
+                  {aegisStore.departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.code}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-xs border border-surface-border rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Search Student</label>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Matric / Name"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-8 pr-2.5 py-1.5 text-xs border border-surface-border rounded-lg"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-surface-card rounded-2xl shadow-academic border border-surface-border overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-surface-border uppercase tracking-wider text-[11px]">
+                  <tr>
+                    <th className="py-3 px-4">Matric Number</th>
+                    <th className="py-3 px-4">Student Name</th>
+                    <th className="py-3 px-4">Course Code</th>
+                    <th className="py-3 px-4 text-center">Credit Load</th>
+                    <th className="py-3 px-4 text-center">Sessions Held</th>
+                    <th className="py-3 px-4 text-center">Attended</th>
+                    <th className="py-3 px-4 text-center">Attendance %</th>
+                    <th className="py-3 px-4 text-right">Audit Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-border">
+                  {filteredReport.map((row, idx) => {
+                    const isSatisfactory = row.attendance_percentage >= 75;
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-4 font-mono font-bold text-oxford-800">{row.matric_number}</td>
+                        <td className="py-3 px-4 font-medium text-oxford-800">{row.student_name}</td>
+                        <td className="py-3 px-4 font-mono font-semibold text-teal-dark">{row.course_code}</td>
+                        <td className="py-3 px-4 text-center font-mono">{row.credit_load}</td>
+                        <td className="py-3 px-4 text-center font-mono">{row.total_sessions}</td>
+                        <td className="py-3 px-4 text-center font-mono font-bold">{row.sessions_attended}</td>
+                        <td className="py-3 px-4 text-center">
+                          <span className={`font-mono font-bold ${isSatisfactory ? 'text-emerald-700' : 'text-red-600'}`}>
+                            {row.attendance_percentage.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                            isSatisfactory ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+                          }`}>
+                            {isSatisfactory ? 'Satisfactory' : 'Flagged (<75%)'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: START LIVE SESSION (CUSTOM PIN, VENUE, ANNOUNCEMENT)               */}
+      {/* ========================================================================= */}
+      {showStartSessionModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-lg w-full p-6 shadow-academic-lg border border-surface-border">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-brand/10 flex items-center justify-center text-teal-brand">
+                  <Play className="w-5 h-5 fill-teal-brand" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-oxford-800">
+                    Initiate Dynamic Class Attendance
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Your phone location will lock as the classroom geofence anchor
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowStartSessionModal(false)} className="text-slate-400 p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleLaunchSession} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Course</label>
+                <select
+                  value={sessionCourseId}
+                  onChange={(e) => setSessionCourseId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg bg-white font-medium"
+                >
+                  {aegisStore.courses.map((c) => (
+                    <option key={c.id} value={c.id}>{c.course_code} - {c.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Custom 4-Digit PIN
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    required
+                    placeholder="e.g. 4421"
+                    value={sessionCustomPin}
+                    onChange={(e) => setSessionCustomPin(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg font-mono font-bold tracking-widest text-center text-base"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Geofence Radius
+                  </label>
+                  <select
+                    value={sessionRadius}
+                    onChange={(e) => setSessionRadius(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg bg-white"
+                  >
+                    <option value={50}>50m (Small Classroom)</option>
+                    <option value={75}>75m (Standard Hall)</option>
+                    <option value={100}>100m (Large Amphitheatre)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Lecture Venue</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Engineering Amphitheatre B"
+                  value={sessionVenue}
+                  onChange={(e) => setSessionVenue(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Class Announcement / Notice (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Lecturer is seated; attendance verification is now open."
+                  value={sessionAnnouncement}
+                  onChange={(e) => setSessionAnnouncement(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-surface-border">
+                <button
+                  type="button"
+                  onClick={() => setShowStartSessionModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isStartingSession}
+                  className="px-5 py-2 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 rounded-lg shadow-sm"
+                >
+                  {isStartingSession ? 'Locking Phone GPS...' : 'Start Session & Lock Geofence'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: MANUAL MARK-IN (FAIL-SAFE FOR DEAD BATTERY / HARDWARE GLITCHES)     */}
+      {/* ========================================================================= */}
+      {showManualMarkModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-lg w-full p-6 shadow-academic-lg border border-surface-border">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-surface-border">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gold-brand/20 flex items-center justify-center text-gold-dark">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-oxford-800">
+                    Manual Sign-In (Fail-Safe Protocol)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Manually sign in physically present students experiencing phone/network failures
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowManualMarkModal(false)} className="text-slate-400 p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleManualMarkSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Select Student
+                </label>
+                <select
+                  required
+                  value={manualStudentId}
+                  onChange={(e) => setManualStudentId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg bg-white"
+                >
+                  <option value="">-- Choose enrolled student --</option>
+                  {studentsEligibleForManualMark.map((item) => (
+                    <option key={item.student!.id} value={item.student!.id}>
+                      {item.student!.matric_number} - {item.user?.full_name} {item.log ? `(Current: ${item.log.status})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Status to Mark
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setManualStatus('Present')}
+                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${
+                      manualStatus === 'Present'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-400 shadow-sm'
+                        : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    Present
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualStatus('Flagged')}
+                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${
+                      manualStatus === 'Flagged'
+                        ? 'bg-amber-100 text-amber-800 border-amber-400 shadow-sm'
+                        : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    Flagged
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualStatus('Absent')}
+                    className={`py-2 text-xs font-bold rounded-lg border transition-all ${
+                      manualStatus === 'Absent'
+                        ? 'bg-red-100 text-red-800 border-red-400 shadow-sm'
+                        : 'border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    Absent
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Reason for Manual Override (Audit Requirement)
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Student phone battery depleted; physically present in 3rd row."
+                  value={manualReason}
+                  onChange={(e) => setManualReason(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-surface-border">
+                <button
+                  type="button"
+                  onClick={() => setShowManualMarkModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-oxford-900 bg-gold-brand hover:bg-gold-light rounded-lg shadow-sm"
+                >
+                  Authorize Manual Sign-In
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: ADD CLASS SCHEDULE TIMETABLE ENTRY                                 */}
+      {/* ========================================================================= */}
+      {showAddScheduleModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-academic-lg border border-surface-border">
+            <h3 className="font-serif text-lg font-bold text-oxford-800 mb-4">Add Class Schedule Entry</h3>
+            <form onSubmit={handleCreateSchedule} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Course</label>
+                <select
+                  value={schedCourseId}
+                  onChange={(e) => setSchedCourseId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                >
+                  {aegisStore.courses.map((c) => (
+                    <option key={c.id} value={c.id}>{c.course_code} - {c.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Day of Week</label>
+                <select
+                  value={schedDay}
+                  onChange={(e: any) => setSchedDay(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                >
+                  {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Start Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={schedStartTime}
+                    onChange={(e) => setSchedStartTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">End Time</label>
+                  <input
+                    type="time"
+                    required
+                    value={schedEndTime}
+                    onChange={(e) => setSchedEndTime(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Classroom / Venue</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Engineering Amphitheatre A"
+                  value={schedVenue}
+                  onChange={(e) => setSchedVenue(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddScheduleModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-oxford-800 rounded-lg"
+                >
+                  Save Schedule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: EDIT / UPDATE PIN                                                  */}
+      {/* ========================================================================= */}
+      {showEditPinModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-sm w-full p-6 shadow-academic-lg border border-surface-border">
+            <h3 className="font-serif text-lg font-bold text-oxford-800 mb-2">Update Session PIN</h3>
+            <p className="text-xs text-slate-500 mb-4">Set a custom 4-digit PIN for students in this contact session.</p>
+            <form onSubmit={handleUpdatePinSubmit} className="space-y-4">
+              <input
+                type="text"
+                maxLength={4}
+                required
+                placeholder="••••"
+                value={updatedPin}
+                onChange={(e) => setUpdatedPin(e.target.value.replace(/\D/g, ''))}
+                className="w-full text-center tracking-[0.5em] font-mono text-3xl font-extrabold py-3 border border-surface-border rounded-xl"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditPinModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-oxford-800 rounded-lg"
+                >
+                  Save PIN
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: BROADCAST ANNOUNCEMENT                                            */}
+      {/* ========================================================================= */}
+      {showAnnouncementModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-academic-lg border border-surface-border">
+            <h3 className="font-serif text-lg font-bold text-oxford-800 mb-2">Broadcast Class Notice</h3>
+            <p className="text-xs text-slate-500 mb-4">This message will immediately appear as an alert on all student check-in screens.</p>
+            <form onSubmit={handleBroadcastAnnouncement} className="space-y-4">
+              <textarea
+                rows={3}
+                required
+                placeholder="e.g. Lecturer is running 10 mins late; sit in front rows."
+                value={broadcastText}
+                onChange={(e) => setBroadcastText(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-surface-border rounded-xl"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAnnouncementModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-oxford-800 rounded-lg"
+                >
+                  Send Notice
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: AUDITORIUM LARGE PIN PROJECTION DISPLAY                            */}
+      {/* ========================================================================= */}
+      {showProjectionModal && activeSession && (
+        <div className="fixed inset-0 bg-oxford-900/95 z-50 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in">
+          <div className="max-w-2xl w-full text-center text-white space-y-8 relative">
+            <button
+              onClick={() => setShowProjectionModal(false)}
+              className="absolute top-0 right-0 p-2 text-slate-400 hover:text-white"
+            >
+              <X className="w-8 h-8" />
+            </button>
+
+            <div>
+              <span className="text-xs font-bold uppercase tracking-widest text-teal-brand px-3 py-1 rounded-full bg-oxford-800 border border-teal-brand/30">
+                Auditorium Projection Display
+              </span>
+              <h2 className="font-serif text-3xl font-extrabold mt-3">
+                {activeCourse?.course_code}: {activeCourse?.title}
+              </h2>
+              <p className="text-sm text-slate-300 mt-1">
+                Open <span className="text-teal-brand font-bold underline">AegisRoll</span> • Enter your Matriculation Number & PIN
+              </p>
+            </div>
+
+            <div className="p-10 rounded-3xl bg-oxford-800 border-2 border-teal-brand/40 shadow-2xl relative overflow-hidden">
+              <div className="font-mono text-7xl sm:text-9xl font-black tracking-[0.25em] text-gold-brand select-all">
+                {activeSession.session_pin}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs text-slate-300">
+                <span>Venue: <strong>{activeSession.venue || 'Lecture Hall'}</strong></span>
+                <span>•</span>
+                <span>Geofence: <strong>{activeSession.geofence_radius_meters}m from CR Phone</strong></span>
+                <span>•</span>
+                <span>Live Checked-in: <strong>{activeSessionLogs.filter((l) => l.status === 'Present').length} Present</strong></span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowProjectionModal(false)}
+              className="px-6 py-3 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-sm transition-colors shadow-lg"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: MANAGE STUDENTS OFFERING SPECIFIC COURSE                          */}
+      {/* ========================================================================= */}
+      {managingCourse && (
+        <div className="fixed inset-0 bg-oxford-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-academic-lg border border-surface-border overflow-hidden">
+            <div className="p-6 bg-oxford-800 text-white flex items-center justify-between border-b border-oxford-700">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-teal-brand/20 border border-teal-brand/40 flex items-center justify-center text-teal-brand">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xl font-extrabold text-teal-brand">
+                      {managingCourse.course_code}
+                    </span>
+                    <span className="text-white text-base font-bold font-serif">
+                      • {managingCourse.title}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    {managingCourse.credit_load} Credits •{' '}
+                    <strong className="text-gold-brand">{enrolledStudentsInManagingCourse.length} Students Offering</strong>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setManagingCourse(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-oxford-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-6 flex-1">
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-center gap-3">
+                <select
+                  value={selectedStudentToEnroll}
+                  onChange={(e) => setSelectedStudentToEnroll(e.target.value)}
+                  className="w-full flex-1 px-3 py-2 text-xs border border-surface-border rounded-lg bg-white"
+                >
+                  <option value="">-- Select student to add ({eligibleStudentsForManagingCourse.length} eligible) --</option>
+                  {eligibleStudentsForManagingCourse.map((item) => (
+                    <option key={item.student.id} value={item.student.id}>
+                      {item.student.matric_number} - {item.user?.full_name} ({item.dept?.code})
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={handleEnrollStudentInManagingCourse}
+                  disabled={!selectedStudentToEnroll}
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 disabled:opacity-40 rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Enroll Student</span>
+                </button>
+              </div>
+
+              <div className="border border-surface-border rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-surface-border uppercase tracking-wider text-[11px]">
+                    <tr>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">Matric No.</th>
+                      <th className="py-2.5 px-3">Student Name</th>
+                      <th className="py-2.5 px-3 text-center">Attendance %</th>
+                      <th className="py-2.5 px-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-border">
+                    {filteredEnrolledStudents.map((item, idx) => (
+                      <tr key={item.enrollmentId} className="hover:bg-slate-50/70">
+                        <td className="py-2.5 px-3 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-oxford-800">{item.student?.matric_number}</td>
+                        <td className="py-2.5 px-3 font-medium text-oxford-800">{item.user?.full_name}</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold">{item.attendanceRate.toFixed(1)}%</td>
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            onClick={() => handleUnenrollStudentFromManagingCourse(item.student!.id, item.student!.matric_number)}
+                            className="px-2.5 py-1 text-[11px] font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg"
+                          >
+                            Drop
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-surface-border flex justify-end">
+              <button
+                onClick={() => setManagingCourse(null)}
+                className="px-4 py-2 text-xs font-bold text-white bg-oxford-800 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: ADD COURSE                                                         */}
+      {/* ========================================================================= */}
+      {showAddCourseModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-lg w-full p-6 shadow-academic-lg border border-surface-border">
+            <h3 className="font-serif text-lg font-bold text-oxford-800 mb-4">Add Course Offering</h3>
+            <form onSubmit={handleCreateCourse} className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Code</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. CSC 401"
+                    value={newCourseCode}
+                    onChange={(e) => setNewCourseCode(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg font-mono uppercase font-bold"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Title</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Distributed Systems Architecture"
+                    value={newCourseTitle}
+                    onChange={(e) => setNewCourseTitle(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Credit Load</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={6}
+                    required
+                    value={newCourseCredits}
+                    onChange={(e) => setNewCourseCredits(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-xs border rounded-lg font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Department</label>
+                  <select
+                    value={newCourseDeptId}
+                    onChange={(e) => setNewCourseDeptId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                  >
+                    {aegisStore.departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.code} - {d.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCourseModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-oxford-800 rounded-lg"
+                >
+                  Save Course
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: ADD STUDENT                                                        */}
+      {/* ========================================================================= */}
+      {showAddStudentModal && (
+        <div className="fixed inset-0 bg-oxford-900/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-lg w-full p-6 shadow-academic-lg border border-surface-border">
+            <h3 className="font-serif text-lg font-bold text-oxford-800 mb-4">Add Student to Roster</h3>
+            <form onSubmit={handleCreateStudent} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Full Legal Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. David Okafor"
+                  value={newStudentName}
+                  onChange={(e) => setNewStudentName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Matriculation No</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. UG/2023/CS/1042"
+                    value={newStudentMatric}
+                    onChange={(e) => setNewStudentMatric(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg font-mono font-bold uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Department</label>
+                  <select
+                    value={newStudentDeptId}
+                    onChange={(e) => setNewStudentDeptId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                  >
+                    {aegisStore.departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.code}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. d.okafor@university.edu"
+                  value={newStudentEmail}
+                  onChange={(e) => setNewStudentEmail(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5 text-teal-brand" /> Physical ID Card QR Code (Optional)
+                  </span>
+                  <span className="text-[10px] text-slate-400">32-character card token</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Paste or type 32-character ID card QR code (leave empty to auto-generate)"
+                  value={newStudentCustomQr}
+                  onChange={(e) => setNewStudentCustomQr(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg font-mono"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddStudentModal(false)}
+                  className="px-4 py-2 text-xs text-slate-600 rounded-lg hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-oxford-800 rounded-lg"
+                >
+                  Enroll Student
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Modals */}
+      {activeSession && (
+        <>
+          <QrCameraScannerModal
+            isOpen={showQrScannerModal}
+            onClose={() => setShowQrScannerModal(false)}
+            sessionId={activeSession.id}
+            sessionTitle={activeCourse ? `${activeCourse.course_code}: ${activeCourse.title}` : 'Active Class Session'}
+            onScanCompleted={() => triggerUpdate()}
+          />
+
+          <SessionQrProjectorModal
+            isOpen={showSessionQrModal}
+            onClose={() => setShowSessionQrModal(false)}
+            session={activeSession}
+            course={activeCourse || undefined}
+          />
+        </>
+      )}
+
+      {selectedStudentForQrModal && (
+        <StudentQrPassModal
+          isOpen={Boolean(selectedStudentForQrModal)}
+          onClose={() => setSelectedStudentForQrModal(null)}
+          student={selectedStudentForQrModal}
+          user={aegisStore.users.find((u) => u.id === selectedStudentForQrModal.user_id)}
+          department={aegisStore.departments.find((d) => d.id === selectedStudentForQrModal.department_id)}
+          onRegenerated={() => triggerUpdate()}
+        />
+      )}
+
+      {selectedStudentForBindModal && (
+        <BindIdCardModal
+          isOpen={Boolean(selectedStudentForBindModal)}
+          onClose={() => setSelectedStudentForBindModal(null)}
+          student={selectedStudentForBindModal}
+          user={aegisStore.users.find((u) => u.id === selectedStudentForBindModal.user_id)}
+          department={aegisStore.departments.find((d) => d.id === selectedStudentForBindModal.department_id)}
+          onBoundSuccessfully={() => {
+            triggerUpdate();
+            setSelectedStudentForBindModal(null);
+          }}
+        />
+      )}
+    </div>
+  );
+};
