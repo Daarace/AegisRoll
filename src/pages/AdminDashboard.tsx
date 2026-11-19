@@ -63,6 +63,7 @@ import { QrCameraScannerModal } from '../components/QrCameraScannerModal';
 import { StudentQrPassModal } from '../components/StudentQrPassModal';
 import { BindIdCardModal } from '../components/BindIdCardModal';
 import { RepSecurityModal } from '../components/RepSecurityModal';
+import { CsvStudentImportModal } from '../components/CsvStudentImportModal';
 
 interface AdminDashboardProps {
   currentUser: UserProfile;
@@ -156,6 +157,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
   // Student CRUD Modals & States
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [showCsvImportModal, setShowCsvImportModal] = useState(false);
+  const [csvTargetCourseId, setCsvTargetCourseId] = useState<string | undefined>(undefined);
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentEmail, setNewStudentEmail] = useState('');
   const [newStudentMatric, setNewStudentMatric] = useState('');
@@ -1621,6 +1624,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => {
+                  setCsvTargetCourseId(undefined);
+                  setShowCsvImportModal(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-oxford-800 font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+                title="Bulk import students from a CSV spreadsheet"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-teal-brand" />
+                <span>Import Students (CSV)</span>
+              </button>
+
+              <button
+                onClick={() => {
                   if (aegisStore.students.length > 0) {
                     setSelectedStudentForBindModal(aegisStore.students[0]);
                   }
@@ -2423,6 +2438,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                   <Plus className="w-3.5 h-3.5" />
                   <span>Enroll Student</span>
                 </button>
+
+                <div className="hidden sm:block w-[1px] h-6 bg-slate-200" />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCsvTargetCourseId(managingCourse.id);
+                    setShowCsvImportModal(true);
+                  }}
+                  className="w-full sm:w-auto px-3.5 py-2 text-xs font-bold text-teal-dark bg-teal-brand/10 hover:bg-teal-brand/20 border border-teal-brand/30 rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                  title={`Bulk import and enroll students directly into ${managingCourse.course_code}`}
+                >
+                  <Upload className="w-3.5 h-3.5 text-teal-brand" />
+                  <span>Batch Import CSV</span>
+                </button>
               </div>
 
               <div className="border border-surface-border rounded-xl overflow-hidden shadow-sm">
@@ -2924,6 +2954,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         onClose={() => setShowSecurityModal(false)}
         currentUser={currentUser}
         onPasswordChanged={() => triggerUpdate()}
+      />
+
+      <CsvStudentImportModal
+        isOpen={showCsvImportModal}
+        onClose={() => setShowCsvImportModal(false)}
+        onImportCompleted={() => triggerUpdate()}
+        preselectedCourseId={csvTargetCourseId}
       />
     </div>
   );

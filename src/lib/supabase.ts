@@ -11,7 +11,9 @@ import {
   AttendanceSubmissionResult,
   DeviceBindingResult,
   AttendanceReportSummary,
-  AttendanceStatus
+  AttendanceStatus,
+  CsvStudentRow,
+  BulkImportResult
 } from '../types';
 import { calculateHaversineDistance } from './geolocation';
 
@@ -724,6 +726,151 @@ class AegisStore {
     student.qr_code_id = newQr;
     this.save();
     return newQr;
+  }
+
+  // --- Bulk CSV Import of Student Rosters ---
+  bulkImportStudents(
+    rows: CsvStudentRow[],
+    options?: {
+      defaultDepartmentId?: string;
+      targetCourseId?: string;
+      updateExisting?: boolean;
+    }
+  ): BulkImportResult {
+    const result: BulkImportResult = {
+      totalRows: rows.length,
+      imported: 0,
+      updated: 0,
+      skipped: 0,
+      enrolled: 0,
+      errors: []
+    };
+
+    const updateExisting = options?.updateExisting ?? true;
+    let defaultDeptId = options?.defaultDepartmentId;
+    if (!defaultDeptId && this.departments.length > 0) {
+      defaultDeptId = this.departments[0].id;
+    }
+    if (!defaultDeptId) {
+      const generalDept = this.addDepartment('General Academic Studies', 'GEN');
+      defaultDeptId = generalDept.id;
+    }
+
+    rows.forEach((row, index) => {
+      const lineNum = index + 1;
+      const cleanMatric = row.matric_number ? row.matric_number.trim().toUpperCase() : '';
+      if (!cleanMatric) {
+        result.errors.push(`Row #${lineNum}: Missing matriculation number.`);
+        result.skipped++;
+        return;
+      }
+
+      const cleanName = row.full_name ? row.full_name.trim() : `Student (${cleanMatric})`;
+      const cleanEmail = row.email && row.email.trim()
+        ? row.email.trim().toLowerCase()
+        : `${cleanMatric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`;
+
+      // Resolve department
+      let deptId = defaultDeptId;
+      if (row.department_code && row.department_code.trim()) {
+        const dCode = row.department_code.trim().toUpperCase();
+        let matched = this.departments.find(
+          (d) => d.code.toUpperCase() === dCode || d.name.toUpperCase().includes(dCode)
+        );
+        if (!matched) {
+          matched = this.addDepartment(dCode + ' Department', dCode);
+        }
+        deptId = matched.id;
+      }
+
+      // Check existing student
+      let student = this.students.find(
+        (s) => s.matric_number.toUpperCase() === cleanMatric
+      );
+
+      if (student) {
+        if (updateExisting) {
+          const user = this.users.find((u) => u.id === student!.user_id);
+          if (user) {
+            user.full_name = cleanName;
+            if (row.email) user.email = cleanEmail;
+          }
+          student.department_id = deptId;
+          if (row.card_qr && row.card_qr.trim().length >= 4) {
+            student.qr_code_id = row.card_qr.trim();
+          }
+          result.updated++;
+        } else {
+          result.skipped++;
+        }
+      } else {
+        // Create new user and student
+        const newUserId = 'usr-' + Math.random().toString(36).substring(2, 9);
+        const newUser: UserProfile = {
+          id: newUserId,
+          email: cleanEmail,
+          full_name: cleanName,
+          role: 'student',
+          password: 'password123',
+          created_at: new Date().toISOString()
+        };
+        this.users.push(newUser);
+
+        const cardQr = row.card_qr && row.card_qr.trim().length >= 4
+          ? row.card_qr.trim()
+          : `AR-QR-${cleanMatric.replace(/[^A-Za-z0-9]/g, '')}`;
+
+        student = {
+          id: 'std-' + Math.random().toString(36).substring(2, 9),
+          user_id: newUserId,
+          matric_number: cleanMatric,
+          department_id: deptId,
+          qr_code_id: cardQr
+        };
+        this.students.push(student);
+        result.imported++;
+      }
+
+      // Course Enrollment
+      const enrollInCourse = (courseId: string) => {
+        const alreadyEnrolled = this.enrollments.some(
+          (e) => e.student_id === student!.id && e.course_id === courseId
+        );
+        if (!alreadyEnrolled) {
+          this.enrollments.push({
+            id: 'enr-' + Math.random().toString(36).substring(2, 9),
+            student_id: student!.id,
+            course_id: courseId,
+            semester: 'Current',
+            academic_year: new Date().getFullYear().toString()
+          });
+          result.enrolled++;
+        }
+      };
+
+      if (options?.targetCourseId) {
+        enrollInCourse(options.targetCourseId);
+      }
+
+      if (row.course_code && row.course_code.trim()) {
+        const cCode = row.course_code.trim().toUpperCase();
+        let course = this.courses.find((c) => c.course_code.toUpperCase() === cCode);
+        if (!course) {
+          course = {
+            id: 'crs-' + Math.random().toString(36).substring(2, 9),
+            course_code: cCode,
+            title: cCode + ' Course',
+            credit_load: 3,
+            department_id: deptId
+          };
+          this.courses.push(course);
+        }
+        enrollInCourse(course.id);
+      }
+    });
+
+    this.save();
+    return result;
   }
 
   // --- Physical Plastic Student ID Card Binding (e.g. 32-character tokens) ---

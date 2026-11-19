@@ -125,3 +125,21 @@ export interface AttendanceReportSummary {
   sessions_attended: number;
   attendance_percentage: number;
 }
+
+export interface CsvStudentRow {
+  matric_number: string;
+  full_name: string;
+  email?: string;
+  department_code?: string;
+  course_code?: string;
+  card_qr?: string;
+}
+
+export interface BulkImportResult {
+  totalRows: number;
+  imported: number;
+  updated: number;
+  skipped: number;
+  enrolled: number;
+  errors: string[];
+}
