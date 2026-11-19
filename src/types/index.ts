@@ -7,6 +7,7 @@ export interface UserProfile {
   email: string;
   full_name: string;
   role: UserRole;
+  password?: string;
   device_fingerprint?: string;
   fingerprint_updated_at?: string;
   created_at?: string;

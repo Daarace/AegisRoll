@@ -124,7 +124,7 @@ export const StudentQrPassModal: React.FC<StudentQrPassModalProps> = ({
                 <ShieldCheck className="w-3.5 h-3.5" /> Verified Student Pass
               </span>
               <span className="text-xs font-mono text-slate-500">
-                {department?.code || 'CSE'}
+                {department?.code || 'ACAD'}
               </span>
             </div>
             <h3 className="font-serif font-bold text-lg text-oxford-800 pt-1">
@@ -134,7 +134,7 @@ export const StudentQrPassModal: React.FC<StudentQrPassModalProps> = ({
               {student.matric_number}
             </p>
             <p className="text-xs text-slate-500">
-              {department?.name || 'Department of Computer Science & Engineering'}
+              {department?.name || 'Academic Department'}
             </p>
           </div>
 

@@ -12,10 +12,15 @@ import {
   Sparkles,
   ExternalLink,
   Menu,
-  X
+  X,
+  Download,
+  Upload,
+  CheckCircle2,
+  KeyRound
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 import { aegisStore, isLiveSupabaseConfigured } from '../lib/supabase';
+import { RepSecurityModal } from './RepSecurityModal';
 
 interface NavbarProps {
   currentUser: UserProfile | null;
@@ -32,6 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [showRoleDropdown, setShowRoleDropdown] = useState(false);
   const [showDbModal, setShowDbModal] = useState(false);
+  const [showRepSecurityModal, setShowRepSecurityModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [customUrl, setCustomUrl] = useState(
@@ -50,6 +56,35 @@ export const Navbar: React.FC<NavbarProps> = ({
     else localStorage.removeItem('aegis_supabase_key');
 
     window.location.reload();
+  };
+
+  const handleExportVault = () => {
+    const data = aegisStore.exportVaultData();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.download = `AegisRoll_LocalVault_Backup_${dateStr}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportVault = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const res = aegisStore.importVaultData(content);
+      alert(res.message);
+      if (res.success) {
+        window.location.reload();
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleSwitchUser = (user: UserProfile) => {
@@ -72,9 +107,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const handleResetData = () => {
-    if (confirm('Reset demo data to initial defaults?')) {
-      aegisStore.resetToDefaults();
-      onUserChange(aegisStore.currentUser);
+    if (confirm('Clear all stored courses, departments, students, and attendance records from this browser vault?')) {
+      aegisStore.clearAllData();
+      onUserChange(null);
       window.location.reload();
     }
   };
@@ -133,69 +168,79 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             </div>
 
-            {/* Center Navigation Links (Role Views) */}
-            <nav className="hidden md:flex items-center gap-1">
-              <button
-                onClick={() => onNavigate('landing')}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  currentView === 'landing'
-                    ? 'bg-oxford-700 text-teal-brand'
-                    : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
-                }`}
-              >
-                Overview
-              </button>
-              {currentUser && (
-                <>
-                  <button
-                    onClick={() => onNavigate('student')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                      currentView === 'student'
-                        ? 'bg-oxford-700 text-teal-brand'
-                        : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
-                    }`}
-                  >
-                    Student Portal
-                  </button>
-                  <button
-                    onClick={() => onNavigate('lecturer')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                      currentView === 'lecturer'
-                        ? 'bg-oxford-700 text-teal-brand'
-                        : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
-                    }`}
-                  >
-                    Lecturer Hub
-                  </button>
-                  <button
-                    onClick={() => onNavigate('admin')}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                      currentView === 'admin'
-                        ? 'bg-oxford-700 text-teal-brand'
-                        : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
-                    }`}
-                  >
-                    Class Rep & Courses
-                  </button>
-                </>
-              )}
-            </nav>
+              {/* Center Navigation Links (Role Views) */}
+              <nav className="hidden md:flex items-center gap-1">
+                <button
+                  onClick={() => onNavigate('landing')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                    currentView === 'landing'
+                      ? 'bg-oxford-700 text-teal-brand'
+                      : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
+                  }`}
+                >
+                  Home
+                </button>
+                {currentUser && (
+                  <>
+                    {currentUser.role === 'student' && (
+                      <button
+                        onClick={() => onNavigate('student')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          currentView === 'student'
+                            ? 'bg-oxford-700 text-teal-brand'
+                            : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
+                        }`}
+                      >
+                        Student Portal
+                      </button>
+                    )}
+                    {currentUser.role === 'lecturer' && (
+                      <button
+                        onClick={() => onNavigate('lecturer')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          currentView === 'lecturer'
+                            ? 'bg-oxford-700 text-teal-brand'
+                            : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
+                        }`}
+                      >
+                        Lecturer Hub
+                      </button>
+                    )}
+                    {currentUser.role === 'admin' && (
+                      <button
+                        onClick={() => onNavigate('admin')}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                          currentView === 'admin'
+                            ? 'bg-oxford-700 text-teal-brand'
+                            : 'text-slate-300 hover:text-white hover:bg-oxford-700/60'
+                        }`}
+                      >
+                        Course Rep Hub
+                      </button>
+                    )}
+                  </>
+                )}
+              </nav>
 
             {/* Right Controls: Database Pill, Fast Switcher & User Profile */}
             <div className="flex items-center gap-2 sm:gap-3">
               {/* Database Connection Status Pill */}
               <button
                 onClick={() => setShowDbModal(true)}
-                title="Supabase Database Configuration"
+                title="AegisRoll Storage & Database Vault"
                 className={`hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-all ${
                   isLiveSupabaseConfigured
                     ? 'bg-emerald-950/60 text-emerald-400 border-emerald-700/50 hover:bg-emerald-900/60'
-                    : 'bg-oxford-700/80 text-teal-brand border-teal-brand/30 hover:bg-oxford-700'
+                    : 'bg-emerald-950/40 text-emerald-400 border-emerald-500/40 hover:bg-emerald-900/40'
                 }`}
               >
-                <Database className="w-3 h-3" />
+                {isLiveSupabaseConfigured ? (
+                  <Database className="w-3 h-3 text-teal-brand" />
+                ) : (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                )}
                 <span className="font-medium text-[11px]">
-                  {isLiveSupabaseConfigured ? 'Supabase Live' : 'Demo Reactive Store'}
+                  {isLiveSupabaseConfigured ? 'Supabase Live' : 'Local Vault (Zero DB)'}
                 </span>
               </button>
 
@@ -232,45 +277,40 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <div className="mt-1.5">{getRoleBadge(currentUser.role)}</div>
                       </div>
 
-                      {/* Fast Role Switcher (For Evaluation & Demos) */}
-                      <div className="px-4 py-2 bg-slate-50 border-b border-surface-border">
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-gold-brand" /> Fast Role Switch
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {aegisStore.users.slice(0, 4).map((u) => (
-                            <button
-                              key={u.id}
-                              onClick={() => handleSwitchUser(u)}
-                              className={`w-full text-left px-2 py-1.5 text-xs rounded-md flex items-center justify-between transition-colors ${
-                                currentUser.id === u.id
-                                  ? 'bg-teal-brand/10 font-bold text-teal-dark'
-                                  : 'hover:bg-slate-200/70 text-slate-700'
-                              }`}
-                            >
-                              <span className="truncate">{u.full_name}</span>
-                              <span className="text-[10px] uppercase font-semibold text-slate-500">
-                                {u.role}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      {/* Security & Password Modal Trigger */}
+                      <button
+                        onClick={() => {
+                          setShowRoleDropdown(false);
+                          setShowRepSecurityModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-100 flex items-center gap-2 font-medium"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-teal-brand" /> Password & Security Settings
+                      </button>
 
-                      {/* Reset demo data */}
+                      {/* Storage / Database Settings */}
+                      <button
+                        onClick={() => {
+                          setShowRoleDropdown(false);
+                          setShowDbModal(true);
+                        }}
+                        className="w-full text-left px-4 py-2 text-xs text-slate-700 hover:bg-slate-100 flex items-center gap-2 font-medium"
+                      >
+                        <Database className="w-3.5 h-3.5 text-slate-400" /> Database & Vault Backup
+                      </button>
+
+                      {/* Clear Local Vault Data */}
                       <button
                         onClick={handleResetData}
-                        className="w-full text-left px-4 py-2 text-xs text-slate-600 hover:bg-slate-100 flex items-center gap-2"
+                        className="w-full text-left px-4 py-2 text-xs text-slate-500 hover:bg-slate-100 flex items-center gap-2"
                       >
-                        <RotateCcw className="w-3.5 h-3.5" /> Reset Local Demo Data
+                        <RotateCcw className="w-3.5 h-3.5" /> Clear All Local Data
                       </button>
 
                       {/* Sign Out */}
                       <button
                         onClick={handleLogout}
-                        className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 border-t border-surface-border"
+                        className="w-full text-left px-4 py-2.5 text-xs text-red-600 hover:bg-red-50 flex items-center gap-2 border-t border-surface-border font-medium"
                       >
                         <LogOut className="w-3.5 h-3.5" /> Sign Out
                       </button>
@@ -355,7 +395,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Database className="w-4 h-4" />
                 <span>
-                  Database: {isLiveSupabaseConfigured ? 'Supabase Connected' : 'Demo Mode (Click to configure)'}
+                  Storage: {isLiveSupabaseConfigured ? 'Supabase Connected' : 'Local Vault (Offline)'}
                 </span>
               </button>
             </div>
@@ -363,10 +403,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         )}
       </header>
 
-      {/* Database Settings Modal */}
+      {/* Database Settings & Vault Modal */}
       {showDbModal && (
-        <div className="fixed inset-0 bg-oxford-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-surface-card rounded-2xl max-w-lg w-full p-6 shadow-academic-lg border border-surface-border">
+        <div className="fixed inset-0 bg-oxford-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-lg w-full p-6 shadow-academic-lg border border-surface-border max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-surface-border">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-teal-brand/10 flex items-center justify-center text-teal-brand">
@@ -374,10 +414,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
                 <div>
                   <h3 className="font-serif text-lg font-bold text-oxford-800">
-                    Supabase PostgreSQL Settings
+                    Storage & Database Management
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Connect AegisRoll to your live Supabase cloud database
+                    Workaround 1: Offline Local Vault vs Optional Cloud DB
                   </p>
                 </div>
               </div>
@@ -389,76 +429,132 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div className="p-3 rounded-xl bg-teal-brand/10 border border-teal-brand/30 text-xs text-oxford-800 leading-relaxed">
-                <strong>Zero-Install Ready:</strong> AegisRoll automatically runs with an in-memory
-                reactive store and persistent sample records if no Supabase credentials are provided.
-                To connect to your live Supabase project, execute <code className="font-mono bg-teal-brand/20 px-1 py-0.5 rounded">schema.sql</code> in the Supabase SQL editor and enter your credentials below.
-              </div>
-
-              <form onSubmit={handleSaveDbSettings} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Supabase Project URL (<code className="font-mono text-slate-500">VITE_SUPABASE_URL</code>)
-                  </label>
-                  <input
-                    type="url"
-                    placeholder="https://your-project.supabase.co"
-                    value={customUrl}
-                    onChange={(e) => setCustomUrl(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono"
-                  />
+            <div className="space-y-5">
+              {/* Workaround 1: Active Local Vault Section */}
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-emerald-900 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    Workaround 1 Active: Zero-Cloud Local Vault
+                  </span>
+                  <span className="text-[10px] uppercase font-bold bg-emerald-200/80 text-emerald-800 px-2 py-0.5 rounded-full">
+                    No DB Needed
+                  </span>
                 </div>
+                <p className="text-slate-600 leading-relaxed">
+                  AegisRoll is running entirely on this device. All courses, students, 32-character physical ID card bindings, class schedules, and attendance logs are securely persisted in your browser's local memory. You can run unlimited attendance sessions without any cloud database or server subscription.
+                </p>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Supabase Anon Public API Key (<code className="font-mono text-slate-500">VITE_SUPABASE_ANON_KEY</code>)
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                    value={customKey}
-                    onChange={(e) => setCustomKey(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono"
-                  />
-                </div>
-
-                <div className="pt-2 flex items-center justify-between">
+                {/* Vault Backup & Restore Buttons */}
+                <div className="pt-1 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      localStorage.removeItem('aegis_supabase_url');
-                      localStorage.removeItem('aegis_supabase_key');
-                      setCustomUrl('');
-                      setCustomKey('');
-                      window.location.reload();
-                    }}
-                    className="text-xs text-slate-500 hover:text-slate-800 underline"
+                    onClick={handleExportVault}
+                    className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
                   >
-                    Clear Credentials (Use Demo Mode)
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Vault Backup (JSON)</span>
                   </button>
 
-                  <div className="flex items-center gap-2">
+                  <label className="px-3.5 py-2 bg-white hover:bg-slate-100 text-oxford-800 border border-slate-300 rounded-lg font-bold text-xs flex items-center gap-1.5 transition shadow-sm cursor-pointer">
+                    <Upload className="w-3.5 h-3.5 text-teal-brand" />
+                    <span>Restore from Backup</span>
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleImportVault}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Optional Cloud Supabase Section */}
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Optional: Connect External Supabase Database
+                  </h4>
+                  {isLiveSupabaseConfigured && (
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded">
+                      Live Connected
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Only fill this out if you decide to connect an external PostgreSQL cloud database. Otherwise, leave empty to keep using Workaround 1 (Zero-Cloud).
+                </p>
+
+                <form onSubmit={handleSaveDbSettings} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Supabase Project URL
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://your-project.supabase.co"
+                      value={customUrl}
+                      onChange={(e) => setCustomUrl(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Supabase Anon Public API Key
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      value={customKey}
+                      onChange={(e) => setCustomKey(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono"
+                    />
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-between">
                     <button
                       type="button"
-                      onClick={() => setShowDbModal(false)}
-                      className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                      onClick={() => {
+                        localStorage.removeItem('aegis_supabase_url');
+                        localStorage.removeItem('aegis_supabase_key');
+                        setCustomUrl('');
+                        setCustomKey('');
+                        window.location.reload();
+                      }}
+                      className="text-xs text-slate-500 hover:text-slate-800 underline"
                     >
-                      Cancel
+                      Clear Credentials (Use Offline Vault)
                     </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-1.5 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 rounded-lg transition-colors"
-                    >
-                      Save & Reload
-                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowDbModal(false)}
+                        className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                      >
+                        Close
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 rounded-lg transition-colors"
+                      >
+                        Save Cloud DB
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </form>
+                </form>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      <RepSecurityModal
+        isOpen={showRepSecurityModal}
+        onClose={() => setShowRepSecurityModal(false)}
+        currentUser={currentUser}
+      />
     </>
   );
 };

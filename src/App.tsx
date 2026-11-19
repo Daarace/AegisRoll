@@ -23,25 +23,11 @@ export const App: React.FC = () => {
   }, []);
 
   const handleNavigate = (view: string) => {
-    // Role guard checks
-    if (view === 'student' && (!currentUser || currentUser.role !== 'student')) {
-      const studentUser = aegisStore.users.find((u) => u.role === 'student');
-      if (studentUser) {
-        aegisStore.setCurrentUser(studentUser);
-        setCurrentUser(studentUser);
-      }
-    } else if (view === 'lecturer' && (!currentUser || currentUser.role !== 'lecturer')) {
-      const lecturerUser = aegisStore.users.find((u) => u.role === 'lecturer');
-      if (lecturerUser) {
-        aegisStore.setCurrentUser(lecturerUser);
-        setCurrentUser(lecturerUser);
-      }
-    } else if (view === 'admin' && (!currentUser || currentUser.role !== 'admin')) {
-      const adminUser = aegisStore.users.find((u) => u.role === 'admin');
-      if (adminUser) {
-        aegisStore.setCurrentUser(adminUser);
-        setCurrentUser(adminUser);
-      }
+    // Role guard checks: if accessing protected views without an active user, redirect to auth
+    if ((view === 'student' || view === 'lecturer' || view === 'admin') && !currentUser) {
+      setCurrentView('auth');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
 
     setCurrentView(view);
@@ -69,29 +55,10 @@ export const App: React.FC = () => {
           onUserChange={handleUserChange}
         />
 
-        {/* Live / Demo Mode Banner */}
-        <div className="bg-oxford-900/5 border-b border-surface-border py-1.5 px-4 text-center">
-          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-[11px] text-slate-600">
-            <span className="w-2 h-2 rounded-full bg-teal-brand animate-pulse" />
-            <span>
-              <strong>AegisRoll v1.0 Production:</strong>{' '}
-              {isLiveSupabaseConfigured
-                ? 'Connected to live Supabase PostgreSQL + Auth + RPC backend.'
-                : 'Interactive Demo Mode active with persistent local state & real-time simulation. Click the database pill in navbar to link your Supabase URL & Key.'}
-            </span>
-          </div>
-        </div>
-
         {/* Main Content Router */}
         <main className="flex-1">
           {currentView === 'landing' && (
-            <LandingPage
-              onNavigate={handleNavigate}
-              onSelectUser={(u) => {
-                setCurrentUser(u);
-                setCurrentView(u.role);
-              }}
-            />
+            <LandingPage onNavigate={handleNavigate} />
           )}
 
           {currentView === 'auth' && (

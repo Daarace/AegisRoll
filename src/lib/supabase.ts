@@ -35,190 +35,17 @@ export const supabase = isLiveSupabaseConfigured
   : null;
 
 // ==============================================================================
-// SEED MOCK DATA (For instant evaluation & demonstration without friction)
+// INITIAL CLEAN DATA STORES (Zero hardcoded records - fully customizable)
 // ==============================================================================
 
-const INITIAL_DEPARTMENTS: Department[] = [
-  { id: 'dept-1', name: 'Department of Computer Science & Engineering', code: 'CSE' },
-  { id: 'dept-2', name: 'Department of Electrical & Information Systems', code: 'EEE' },
-  { id: 'dept-3', name: 'Department of Mathematics & Statistics', code: 'MTH' }
-];
-
-const INITIAL_USERS: UserProfile[] = [
-  {
-    id: 'usr-student-1',
-    email: 'alex.chen@university.edu',
-    full_name: 'Alex Chen',
-    role: 'student',
-    device_fingerprint: 'fp_sample_device_alex_123',
-    fingerprint_updated_at: new Date(Date.now() - 3600000).toISOString()
-  },
-  {
-    id: 'usr-student-2',
-    email: 'fatima.almansoori@university.edu',
-    full_name: 'Fatima Al-Mansoori',
-    role: 'student',
-    device_fingerprint: 'fp_sample_device_fatima_456',
-    fingerprint_updated_at: new Date(Date.now() - 7200000).toISOString()
-  },
-  {
-    id: 'usr-student-3',
-    email: 'david.okafor@university.edu',
-    full_name: 'David Okafor',
-    role: 'student'
-  },
-  {
-    id: 'usr-student-4',
-    email: 'sophia.martinez@university.edu',
-    full_name: 'Sophia Martinez',
-    role: 'student'
-  },
-  {
-    id: 'usr-student-5',
-    email: 'tariq.nawaz@university.edu',
-    full_name: 'Tariq Nawaz',
-    role: 'student'
-  },
-  {
-    id: 'usr-lecturer-1',
-    email: 'dr.adams@university.edu',
-    full_name: 'Dr. Gregory Adams',
-    role: 'lecturer'
-  },
-  {
-    id: 'usr-admin-1',
-    email: 'class.rep@university.edu',
-    full_name: 'Chidi Nnamdi (Class Rep)',
-    role: 'admin'
-  }
-];
-
-const INITIAL_STUDENTS: Student[] = [
-  { id: 'std-1', user_id: 'usr-student-1', matric_number: 'UG/2023/CS/1042', department_id: 'dept-1', qr_code_id: 'AR-QR-CS1042' },
-  { id: 'std-2', user_id: 'usr-student-2', matric_number: 'UG/2023/CS/1089', department_id: 'dept-1', qr_code_id: 'AR-QR-CS1089' },
-  { id: 'std-3', user_id: 'usr-student-3', matric_number: 'UG/2023/EE/2014', department_id: 'dept-2', qr_code_id: 'AR-QR-EE2014' },
-  { id: 'std-4', user_id: 'usr-student-4', matric_number: 'UG/2023/CS/1105', department_id: 'dept-1', qr_code_id: 'AR-QR-CS1105' },
-  { id: 'std-5', user_id: 'usr-student-5', matric_number: 'UG/2023/CS/1120', department_id: 'dept-1', qr_code_id: 'AR-QR-CS1120' }
-];
-
-const INITIAL_COURSES: Course[] = [
-  {
-    id: 'crs-1',
-    course_code: 'CSC 401',
-    title: 'Distributed Systems & Network Architecture',
-    credit_load: 3,
-    department_id: 'dept-1',
-    lecturer_id: 'usr-lecturer-1'
-  },
-  {
-    id: 'crs-2',
-    course_code: 'CSC 405',
-    title: 'Cryptography & Cyber-Physical Security',
-    credit_load: 4,
-    department_id: 'dept-1',
-    lecturer_id: 'usr-lecturer-1'
-  },
-  {
-    id: 'crs-3',
-    course_code: 'EEE 312',
-    title: 'Signals, Systems & Digital Processing',
-    credit_load: 3,
-    department_id: 'dept-2',
-    lecturer_id: 'usr-lecturer-1'
-  }
-];
-
-const INITIAL_SCHEDULES: ClassSchedule[] = [
-  {
-    id: 'sch-1',
-    course_id: 'crs-1',
-    day_of_week: 'Monday',
-    start_time: '09:00',
-    end_time: '11:00',
-    venue: 'Engineering Amphitheatre A'
-  },
-  {
-    id: 'sch-2',
-    course_id: 'crs-1',
-    day_of_week: 'Thursday',
-    start_time: '14:00',
-    end_time: '16:00',
-    venue: 'Computer Science Lab 2'
-  },
-  {
-    id: 'sch-3',
-    course_id: 'crs-2',
-    day_of_week: 'Wednesday',
-    start_time: '10:00',
-    end_time: '12:00',
-    venue: 'Cybersecurity Seminar Room B'
-  },
-  {
-    id: 'sch-4',
-    course_id: 'crs-3',
-    day_of_week: 'Friday',
-    start_time: '08:30',
-    end_time: '10:30',
-    venue: 'EEE Main Hall'
-  }
-];
-
-const INITIAL_ENROLLMENTS: Enrollment[] = [
-  { id: 'enr-1', student_id: 'std-1', course_id: 'crs-1', semester: 'First Semester', academic_year: '2026/2027' },
-  { id: 'enr-2', student_id: 'std-2', course_id: 'crs-1', semester: 'First Semester', academic_year: '2026/2027' },
-  { id: 'enr-3', student_id: 'std-4', course_id: 'crs-1', semester: 'First Semester', academic_year: '2026/2027' },
-  { id: 'enr-4', student_id: 'std-5', course_id: 'crs-1', semester: 'First Semester', academic_year: '2026/2027' },
-  { id: 'enr-5', student_id: 'std-1', course_id: 'crs-2', semester: 'First Semester', academic_year: '2026/2027' },
-  { id: 'enr-6', student_id: 'std-3', course_id: 'crs-3', semester: 'First Semester', academic_year: '2026/2027' }
-];
-
-// Active classroom session anchored to Class Rep's phone location (Science Lecture Hall: 40.7128, -74.0060)
-const INITIAL_SESSIONS: ClassSession[] = [
-  {
-    id: 'ses-1',
-    course_id: 'crs-1',
-    lecturer_id: 'usr-admin-1', // Class Rep anchored
-    session_pin: '8492',
-    start_time: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
-    is_active: true,
-    admin_lat: 40.712776,
-    admin_lon: -74.005974,
-    geofence_radius_meters: 75,
-    venue: 'Engineering Amphitheatre A',
-    announcement: 'Welcome to CSC 401. Please keep your seats until after attendance is verified.',
-    auto_close_minutes: 30,
-    anchor_device_name: "Course Representative's Phone (Galaxy S24)"
-  }
-];
-
-const INITIAL_LOGS: AttendanceLog[] = [
-  {
-    id: 'log-1',
-    session_id: 'ses-1',
-    student_id: 'std-2',
-    checked_in_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-    student_lat: 40.712800,
-    student_lon: -74.005950,
-    gps_accuracy_meters: 8.5,
-    distance_calculated: 3.4,
-    status: 'Present',
-    marked_by: 'geofence_auto',
-    notes: "Verified within 3.4m of Class Representative's phone."
-  },
-  {
-    id: 'log-2',
-    session_id: 'ses-1',
-    student_id: 'std-4',
-    checked_in_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-    student_lat: 40.713900,
-    student_lon: -74.006500,
-    gps_accuracy_meters: 14.0,
-    distance_calculated: 132.8,
-    status: 'Flagged',
-    marked_by: 'geofence_auto',
-    notes: "Outside geofence (132.8m from CR's phone > 82.0m threshold)."
-  }
-];
+const INITIAL_DEPARTMENTS: Department[] = [];
+const INITIAL_USERS: UserProfile[] = [];
+const INITIAL_STUDENTS: Student[] = [];
+const INITIAL_COURSES: Course[] = [];
+const INITIAL_SCHEDULES: ClassSchedule[] = [];
+const INITIAL_ENROLLMENTS: Enrollment[] = [];
+const INITIAL_SESSIONS: ClassSession[] = [];
+const INITIAL_LOGS: AttendanceLog[] = [];
 
 // Reactive event dispatcher for real-time updates in both mock & live environments
 type RealtimeCallback = (payload: any) => void;
@@ -286,13 +113,7 @@ class AegisStore {
   constructor() {
     this.departments = this.load('aegis_departments', INITIAL_DEPARTMENTS);
     this.users = this.load('aegis_users', INITIAL_USERS);
-    this.students = this.load('aegis_students', INITIAL_STUDENTS).map((st) => {
-      if (!st.qr_code_id) {
-        const rawMatric = st.matric_number ? st.matric_number.replace(/[^A-Za-z0-9]/g, '') : '';
-        st.qr_code_id = `AR-QR-${rawMatric || Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-      }
-      return st;
-    });
+    this.students = this.load('aegis_students', INITIAL_STUDENTS);
     this.courses = this.load('aegis_courses', INITIAL_COURSES);
     this.schedules = this.load('aegis_schedules', INITIAL_SCHEDULES);
     this.enrollments = this.load('aegis_enrollments', INITIAL_ENROLLMENTS);
@@ -302,12 +123,13 @@ class AegisStore {
     const savedUser = localStorage.getItem('aegis_current_user');
     if (savedUser) {
       try {
-        this.currentUser = JSON.parse(savedUser);
+        const parsed = JSON.parse(savedUser);
+        this.currentUser = this.users.find((u) => u.id === parsed.id) || null;
       } catch {
-        this.currentUser = this.users[0];
+        this.currentUser = null;
       }
     } else {
-      this.currentUser = this.users[6]; // Default to Class Representative (Admin)
+      this.currentUser = null;
     }
   }
 
@@ -337,16 +159,80 @@ class AegisStore {
   }
 
   resetToDefaults() {
-    this.departments = [...INITIAL_DEPARTMENTS];
-    this.users = [...INITIAL_USERS];
-    this.students = [...INITIAL_STUDENTS];
-    this.courses = [...INITIAL_COURSES];
-    this.schedules = [...INITIAL_SCHEDULES];
-    this.enrollments = [...INITIAL_ENROLLMENTS];
-    this.sessions = [...INITIAL_SESSIONS];
-    this.logs = [...INITIAL_LOGS];
-    this.currentUser = this.users[6];
-    this.save();
+    this.clearAllData();
+  }
+
+  clearAllData() {
+    this.departments = [];
+    this.users = [];
+    this.students = [];
+    this.courses = [];
+    this.schedules = [];
+    this.enrollments = [];
+    this.sessions = [];
+    this.logs = [];
+    this.currentUser = null;
+    localStorage.removeItem('aegis_departments');
+    localStorage.removeItem('aegis_users');
+    localStorage.removeItem('aegis_students');
+    localStorage.removeItem('aegis_courses');
+    localStorage.removeItem('aegis_schedules');
+    localStorage.removeItem('aegis_enrollments');
+    localStorage.removeItem('aegis_sessions');
+    localStorage.removeItem('aegis_logs');
+    localStorage.removeItem('aegis_current_user');
+    localStorage.removeItem('aegis_admin_lock_enabled');
+  }
+
+  // --- Workaround 1: Offline Vault Export & Import (Zero External Database) ---
+
+  exportVaultData(): string {
+    const payload = {
+      system: 'AegisRoll Offline Vault',
+      version: '1.0',
+      exported_at: new Date().toISOString(),
+      counts: {
+        students: this.students.length,
+        courses: this.courses.length,
+        sessions: this.sessions.length,
+        logs: this.logs.length
+      },
+      departments: this.departments,
+      users: this.users,
+      students: this.students,
+      courses: this.courses,
+      schedules: this.schedules,
+      enrollments: this.enrollments,
+      sessions: this.sessions,
+      logs: this.logs
+    };
+    return JSON.stringify(payload, null, 2);
+  }
+
+  importVaultData(jsonString: string): { success: boolean; message: string; count?: number } {
+    try {
+      const data = JSON.parse(jsonString);
+      if (!data || !Array.isArray(data.students)) {
+        return { success: false, message: 'Invalid AegisRoll vault backup file. Missing student array.' };
+      }
+      if (Array.isArray(data.departments)) this.departments = data.departments;
+      if (Array.isArray(data.users)) this.users = data.users;
+      if (Array.isArray(data.students)) this.students = data.students;
+      if (Array.isArray(data.courses)) this.courses = data.courses;
+      if (Array.isArray(data.schedules)) this.schedules = data.schedules;
+      if (Array.isArray(data.enrollments)) this.enrollments = data.enrollments;
+      if (Array.isArray(data.sessions)) this.sessions = data.sessions;
+      if (Array.isArray(data.logs)) this.logs = data.logs;
+
+      this.save();
+      return {
+        success: true,
+        message: `Vault successfully restored! Loaded ${this.students.length} students, ${this.courses.length} courses, and ${this.logs.length} attendance logs.`,
+        count: this.students.length
+      };
+    } catch (err: any) {
+      return { success: false, message: 'Failed to parse JSON file: ' + err.message };
+    }
   }
 
   // --- Auth & Session Logic ---
@@ -354,6 +240,179 @@ class AegisStore {
   setCurrentUser(user: UserProfile | null) {
     this.currentUser = user;
     this.save();
+  }
+
+  getInstitutionName(): string {
+    return localStorage.getItem('aegis_institution_name') || 'University Academic Portal';
+  }
+
+  setInstitutionName(name: string): void {
+    localStorage.setItem('aegis_institution_name', name.trim());
+  }
+
+  // --- Department Management (Fully Customizable) ---
+
+  addDepartment(name: string, code: string): Department {
+    const newDept: Department = {
+      id: 'dept-' + Math.random().toString(36).substring(2, 9),
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      created_at: new Date().toISOString()
+    };
+    this.departments.push(newDept);
+    this.save();
+    return newDept;
+  }
+
+  updateDepartment(id: string, name: string, code: string): boolean {
+    const dept = this.departments.find((d) => d.id === id);
+    if (!dept) return false;
+    dept.name = name.trim();
+    dept.code = code.trim().toUpperCase();
+    this.save();
+    return true;
+  }
+
+  deleteDepartment(id: string): { success: boolean; message: string } {
+    const hasCourses = this.courses.some((c) => c.department_id === id);
+    if (hasCourses) {
+      return { success: false, message: 'Cannot delete department: courses are currently assigned to it.' };
+    }
+    const hasStudents = this.students.some((s) => s.department_id === id);
+    if (hasStudents) {
+      return { success: false, message: 'Cannot delete department: students are currently assigned to it.' };
+    }
+    this.departments = this.departments.filter((d) => d.id !== id);
+    this.save();
+    return { success: true, message: 'Department successfully deleted.' };
+  }
+
+  updateUserPassword(userId: string, newPass: string): boolean {
+    const user = this.users.find((u) => u.id === userId);
+    if (!user) return false;
+    user.password = newPass.trim();
+    if (this.currentUser?.id === userId) {
+      this.currentUser.password = newPass.trim();
+    }
+    this.save();
+    return true;
+  }
+
+  resetPasswordByEmail(email: string, newPass: string): { success: boolean; message: string } {
+    const user = this.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+    if (!user) {
+      return { success: false, message: 'No registered account found with this institutional email.' };
+    }
+    user.password = newPass.trim();
+    if (this.currentUser?.id === user.id) {
+      this.currentUser.password = newPass.trim();
+    }
+    this.save();
+    return { success: true, message: `Password for ${user.email} has been successfully reset.` };
+  }
+
+  verifyUserPassword(emailOrId: string, passAttempt: string): boolean {
+    const user = this.users.find(
+      (u) => u.id === emailOrId || u.email.toLowerCase() === emailOrId.toLowerCase()
+    );
+    if (!user || !user.password) return false;
+    return user.password === passAttempt.trim();
+  }
+
+  isAdminLockEnabled(): boolean {
+    return localStorage.getItem('aegis_admin_lock_enabled') === 'true';
+  }
+
+  setAdminLockEnabled(enabled: boolean) {
+    localStorage.setItem('aegis_admin_lock_enabled', enabled ? 'true' : 'false');
+  }
+
+  getAdminUser(): UserProfile | undefined {
+    return this.users.find((u) => u.role === 'admin');
+  }
+
+  // --- Course Rep Manual Attendance by Matriculation Number ---
+
+  markAttendanceByMatricNumber(
+    sessionId: string,
+    matricNumber: string,
+    status: AttendanceStatus = 'Present',
+    studentName?: string,
+    markedBy: string = 'Course Representative'
+  ): { success: boolean; message: string; log?: AttendanceLog; student?: Student } {
+    const cleanMatric = matricNumber.trim();
+    if (!cleanMatric) {
+      return { success: false, message: 'Please enter a valid matriculation number.' };
+    }
+
+    const session = this.sessions.find((s) => s.id === sessionId);
+    if (!session) {
+      return { success: false, message: 'Active session not found.' };
+    }
+
+    // Find student by matric number (case-insensitive)
+    let student = this.students.find(
+      (st) => st.matric_number.toLowerCase() === cleanMatric.toLowerCase()
+    );
+
+    // If student doesn't exist yet, automatically create student record and user profile
+    if (!student) {
+      const newUserId = 'usr-std-' + Math.random().toString(36).substring(2, 9);
+      const studentFullName = studentName?.trim() || `Student (${cleanMatric})`;
+      const defaultDeptId = this.departments[0]?.id || 'dept-general';
+
+      const newUser: UserProfile = {
+        id: newUserId,
+        email: `${cleanMatric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`,
+        full_name: studentFullName,
+        role: 'student',
+        password: 'password123',
+        created_at: new Date().toISOString()
+      };
+      this.users.push(newUser);
+
+      student = {
+        id: 'std-' + Math.random().toString(36).substring(2, 9),
+        user_id: newUserId,
+        matric_number: cleanMatric.toUpperCase(),
+        department_id: defaultDeptId,
+        qr_code_id: `AR-QR-${cleanMatric.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`
+      };
+      this.students.push(student);
+    }
+
+    // Ensure student is enrolled in the session's course
+    const isEnrolled = this.enrollments.some(
+      (e) => e.student_id === student!.id && e.course_id === session.course_id
+    );
+    if (!isEnrolled) {
+      this.enrollments.push({
+        id: 'enr-' + Math.random().toString(36).substring(2, 9),
+        student_id: student.id,
+        course_id: session.course_id,
+        semester: 'Current',
+        academic_year: new Date().getFullYear().toString()
+      });
+    }
+
+    // Record attendance
+    const log = this.manuallyMarkAttendance(
+      sessionId,
+      student.id,
+      status,
+      `Manual Roll-Call by Course Rep (Matric: ${cleanMatric})`,
+      markedBy
+    );
+
+    const user = this.users.find((u) => u.id === student!.user_id);
+    const displayName = user?.full_name || student.matric_number;
+
+    return {
+      success: true,
+      message: `Marked ${status}: ${displayName} (${student.matric_number})`,
+      log,
+      student
+    };
   }
 
   async validateAndBindDevice(

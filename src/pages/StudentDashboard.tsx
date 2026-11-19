@@ -369,13 +369,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
                       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-3">
                         <div>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                            Option 1 (Recommended)
+                            Digital Pass
                           </span>
                           <h4 className="font-bold text-sm text-oxford-800 mt-1.5">
-                            Show My Student QR Pass
+                            Show My Digital ID Pass
                           </h4>
                           <p className="text-xs text-slate-500 mt-1">
-                            Display your unique QR badge on your screen for the Course Rep or Lecturer to scan.
+                            Display your unique personal QR pass on your phone screen for the Course Rep to scan.
                           </p>
                         </div>
                         <button
@@ -384,31 +384,26 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
                           className="w-full py-2 px-3 rounded-lg bg-oxford-800 hover:bg-oxford-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition"
                         >
                           <QrCode className="w-4 h-4 text-teal-brand" />
-                          <span>Open My QR Pass</span>
+                          <span>Open My Digital Pass</span>
                         </button>
                       </div>
 
-                      {/* Option B: Scan Projected Classroom QR */}
+                      {/* Option B: Physical ID Card / Manual Entry */}
                       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-3">
                         <div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-gold-dark bg-gold-brand/20 px-2 py-0.5 rounded border border-gold-brand/30">
-                            Option 2
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            Physical Card / Manual
                           </span>
                           <h4 className="font-bold text-sm text-oxford-800 mt-1.5">
-                            Scan Classroom Projector QR
+                            Physical ID or Roll Call
                           </h4>
                           <p className="text-xs text-slate-500 mt-1">
-                            Use your phone camera to scan the backup QR code projected on the hall screen.
+                            Have the Course Rep scan your plastic university card (32-character code) or enter your matriculation number manually.
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowStudentScannerModal(true)}
-                          className="w-full py-2 px-3 rounded-lg bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs flex items-center justify-center gap-1.5 transition"
-                        >
-                          <Camera className="w-4 h-4" />
-                          <span>Launch Camera Scanner</span>
-                        </button>
+                        <div className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-[11px] text-slate-600 font-medium text-center">
+                          Ask your Course Rep to mark your matric number directly
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -451,56 +446,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
                     Presence is verified by comparing your phone's GPS distance against the{' '}
                     <strong>{selectedSession?.anchor_device_name || "Course Representative's Phone"}</strong>.
                   </p>
-
-                  {/* Location Mode Switcher (For Evaluation & Demo Review) */}
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-700 flex items-center gap-1">
-                        <Compass className="w-3.5 h-3.5 text-teal-brand" /> Geolocation Telemetry Simulation
-                      </span>
-                      <span className="text-[10px] text-slate-500">Evaluation helper</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSimulationMode('real')}
-                        className={`p-2 rounded-lg border text-center transition-all ${
-                          simulationMode === 'real'
-                            ? 'bg-oxford-800 text-white font-bold border-oxford-800'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <Navigation className="w-3.5 h-3.5 mx-auto mb-0.5" />
-                        <span className="text-[10px]">Real Device GPS</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setSimulationMode('podium')}
-                        className={`p-2 rounded-lg border text-center transition-all ${
-                          simulationMode === 'podium'
-                            ? 'bg-emerald-700 text-white font-bold border-emerald-700'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 mx-auto mb-0.5 text-emerald-400" />
-                        <span className="text-[10px]">Near CR Phone (&lt;10m)</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setSimulationMode('outside')}
-                        className={`p-2 rounded-lg border text-center transition-all ${
-                          simulationMode === 'outside'
-                            ? 'bg-amber-700 text-white font-bold border-amber-700'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        <AlertTriangle className="w-3.5 h-3.5 mx-auto mb-0.5 text-amber-300" />
-                        <span className="text-[10px]">Far Outside (&gt;100m)</span>
-                      </button>
-                    </div>
-                  </div>
 
                   {/* Submit Button */}
                   <button
@@ -636,20 +581,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
           user={currentUser}
           department={aegisStore.departments.find((d) => d.id === student.department_id)}
           onRegenerated={() => refreshData()}
-        />
-      )}
-
-      {/* Student Camera Scanner Modal (for scanning projected class QR) */}
-      {selectedSession && (
-        <QrCameraScannerModal
-          isOpen={showStudentScannerModal}
-          onClose={() => setShowStudentScannerModal(false)}
-          sessionId={selectedSession.id}
-          sessionTitle={`Scan ${aegisStore.courses.find((c) => c.id === selectedSession.course_id)?.course_code || 'Class'} Backup QR`}
-          onScanCompleted={() => {
-            refreshData();
-            setShowStudentScannerModal(false);
-          }}
         />
       )}
     </div>

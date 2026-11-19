@@ -23,20 +23,12 @@ import { UserProfile } from '../types';
 
 interface LandingPageProps {
   onNavigate: (view: string) => void;
-  onSelectUser: (user: UserProfile) => void;
+  onSelectUser?: (user: UserProfile) => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
-  onNavigate,
-  onSelectUser
+  onNavigate
 }) => {
-  const handleLaunchRole = (role: 'student' | 'lecturer' | 'admin') => {
-    const user = aegisStore.users.find((u) => u.role === role) || aegisStore.users[0];
-    aegisStore.setCurrentUser(user);
-    onSelectUser(user);
-    onNavigate(role);
-  };
-
   return (
     <div className="space-y-16 pb-16">
       {/* 1. Hero Section */}
@@ -48,7 +40,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-oxford-700/80 border border-teal-brand/30 text-teal-brand text-xs font-semibold shadow-inner">
             <Radio className="w-3.5 h-3.5 animate-pulse" />
-            <span>Zero-Install Progressive Web App • Dynamic Classroom Geofencing</span>
+            <span>Progressive Web App • Geofenced Classroom Attendance & Roll Call</span>
           </div>
 
           {/* Headline & Brand Title */}
@@ -61,9 +53,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {/* Subtitle */}
           <p className="max-w-3xl mx-auto text-base sm:text-lg text-slate-300 font-sans leading-relaxed">
-            AegisRoll eliminates attendance fraud with hardware-free, zero-install browser geofencing. 
-            Lecturers broadcast a dynamic 4-digit PIN, while the PostgreSQL Haversine engine 
-            verifies students within a 50m–100m perimeter directly from their mobile browser.
+            AegisRoll enables hardware-free, zero-cloud offline attendance tracking. 
+            Lecturers and Course Representatives anchor classroom sessions with dynamic PIN verification, 
+            rapid ID card scanning, and instant manual roll calls by matriculation number.
           </p>
 
           {/* CTA Buttons */}
@@ -72,7 +64,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               onClick={() => onNavigate('auth')}
               className="px-6 py-3.5 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-sm transition-all shadow-academic flex items-center gap-2 group"
             >
-              <span>Launch Web App / Sign In</span>
+              <span>Access Academic Portal / Sign In</span>
               <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </button>
 
@@ -80,59 +72,40 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               href="#how-it-works"
               className="px-6 py-3.5 rounded-xl bg-oxford-700/80 hover:bg-oxford-700 text-white font-semibold text-sm transition-all border border-oxford-600 flex items-center gap-2"
             >
-              <span>See How It Works</span>
+              <span>System Overview</span>
             </a>
           </div>
 
-          {/* Interactive Instant Role Tester Card */}
-          <div className="pt-8 max-w-2xl mx-auto">
-            <div className="p-4 rounded-2xl bg-oxford-700/40 border border-oxford-600/80 backdrop-blur-sm shadow-xl text-left">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-gold-brand flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" /> Instant Role Launcher (Demo Mode)
-                </span>
-                <span className="text-[11px] text-slate-400">One-click evaluation</span>
+          {/* Professional 3-Pillar Capability Grid */}
+          <div className="pt-10 max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+            <div className="p-4 rounded-2xl bg-oxford-700/40 border border-oxford-600/80 backdrop-blur-sm shadow-md">
+              <div className="w-8 h-8 rounded-lg bg-teal-brand/20 text-teal-brand flex items-center justify-center mb-2.5">
+                <MapPin className="w-4 h-4" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <button
-                  onClick={() => handleLaunchRole('student')}
-                  className="flex items-center gap-2.5 p-3 rounded-xl bg-oxford-800/90 hover:bg-oxford-700 border border-teal-brand/30 transition-all text-left group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-teal-brand/20 text-teal-brand flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                    <GraduationCap className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">Student</div>
-                    <div className="text-[10px] text-slate-300">Alex Chen (PIN Check-in)</div>
-                  </div>
-                </button>
+              <h3 className="font-bold text-sm text-white">Geofenced Check-In</h3>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                Mobile GPS telemetry calculates exact perimeter distance from the classroom anchor device.
+              </p>
+            </div>
 
-                <button
-                  onClick={() => handleLaunchRole('lecturer')}
-                  className="flex items-center gap-2.5 p-3 rounded-xl bg-oxford-800/90 hover:bg-oxford-700 border border-gold-brand/40 transition-all text-left group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-gold-brand/20 text-gold-brand flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                    <Presentation className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">Lecturer</div>
-                    <div className="text-[10px] text-slate-300">Dr. Adams (Live Monitor)</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleLaunchRole('admin')}
-                  className="flex items-center gap-2.5 p-3 rounded-xl bg-oxford-800/90 hover:bg-oxford-700 border border-red-500/40 transition-all text-left group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                    <ShieldAlert className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">Class Rep (Admin)</div>
-                    <div className="text-[10px] text-slate-300">Courses, Roster & Audits</div>
-                  </div>
-                </button>
+            <div className="p-4 rounded-2xl bg-oxford-700/40 border border-oxford-600/80 backdrop-blur-sm shadow-md">
+              <div className="w-8 h-8 rounded-lg bg-teal-brand/20 text-teal-brand flex items-center justify-center mb-2.5">
+                <CheckCircle2 className="w-4 h-4" />
               </div>
+              <h3 className="font-bold text-sm text-white">Direct Matric Roll Call</h3>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                Course Representatives can instantly verify and mark students present by typing or scanning their matric number.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-oxford-700/40 border border-oxford-600/80 backdrop-blur-sm shadow-md">
+              <div className="w-8 h-8 rounded-lg bg-teal-brand/20 text-teal-brand flex items-center justify-center mb-2.5">
+                <FileSpreadsheet className="w-4 h-4" />
+              </div>
+              <h3 className="font-bold text-sm text-white">Official Exports</h3>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                Export accredited attendance matrices and rosters to CSV, Excel, and Word (.docx) with one click.
+              </p>
             </div>
           </div>
         </div>
@@ -170,23 +143,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
           </div>
 
-          {/* Card 2: Zero-Install Browser Access */}
+          {/* Card 2: Zero-Cloud & 32-Char Card Scanning (Workaround 1) */}
           <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border hover:shadow-academic-lg transition-all flex flex-col justify-between">
             <div>
               <div className="w-12 h-12 rounded-xl bg-oxford-800/10 border border-oxford-800/20 text-oxford-800 flex items-center justify-center mb-5">
                 <Smartphone className="w-6 h-6" />
               </div>
               <h3 className="font-serif text-xl font-bold text-oxford-800 mb-2">
-                Zero-Install Browser Access
+                Zero-Cloud & Physical Card Scanning
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed mb-4">
-                Students access the system instantly from Safari, Chrome, or any mobile browser. 
-                Integrated <strong className="text-oxford-800">FingerprintJS</strong> binds each student’s device fingerprint, 
-                locking out proxy attendance attempts if another student attempts to check in from the same device within 12 hours.
+                No external database or server needed (Workaround 1). Course Representatives can rapidly scan students' 
+                pre-printed <strong className="text-oxford-800">32-character physical plastic ID cards</strong> or digital passes 
+                directly from their mobile camera with instant offline local vault persistence and 12h hardware proxy prevention.
               </p>
             </div>
             <div className="pt-4 border-t border-slate-100 flex items-center text-xs font-semibold text-oxford-800">
-              <Lock className="w-4 h-4 mr-1.5 text-teal-brand" /> Anti-proxy 12h hardware lock
+              <Lock className="w-4 h-4 mr-1.5 text-teal-brand" /> 100% Offline Vault & 32-char card support
             </div>
           </div>
 

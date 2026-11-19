@@ -39,7 +39,8 @@ import {
   Camera,
   QrCode,
   CreditCard,
-  ScanLine
+  ScanLine,
+  Lock
 } from 'lucide-react';
 import Papa from 'papaparse';
 import {
@@ -59,16 +60,40 @@ import { exportAttendanceToCSV, exportAttendanceToPDF, exportAttendanceToWord } 
 import { getHighAccuracyLocation, GeoErrorResult } from '../lib/geolocation';
 import { GpsPermissionModal } from '../components/GpsPermissionModal';
 import { QrCameraScannerModal } from '../components/QrCameraScannerModal';
-import { SessionQrProjectorModal } from '../components/SessionQrProjectorModal';
 import { StudentQrPassModal } from '../components/StudentQrPassModal';
 import { BindIdCardModal } from '../components/BindIdCardModal';
+import { RepSecurityModal } from '../components/RepSecurityModal';
 
 interface AdminDashboardProps {
   currentUser: UserProfile;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'schedules' | 'live_session' | 'courses' | 'students' | 'reports'>('schedules');
+  const [activeTab, setActiveTab] = useState<'schedules' | 'live_session' | 'courses' | 'departments' | 'students' | 'reports'>('schedules');
+
+  // Security & Screen Lock states
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [isRepUnlocked, setIsRepUnlocked] = useState(!aegisStore.isAdminLockEnabled());
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+
+  // Department Management States
+  const [showAddDeptModal, setShowAddDeptModal] = useState(false);
+  const [editingDept, setEditingDept] = useState<Department | null>(null);
+  const [deptNameInput, setDeptNameInput] = useState('');
+  const [deptCodeInput, setDeptCodeInput] = useState('');
+  const [deptError, setDeptError] = useState<string | null>(null);
+
+  // Institution / Campus Name Modal
+  const [showInstitutionModal, setShowInstitutionModal] = useState(false);
+  const [institutionNameInput, setInstitutionNameInput] = useState(aegisStore.getInstitutionName());
+
+  // Quick Roll Call by Matriculation Number (Course Rep exclusive)
+  const [quickMatricInput, setQuickMatricInput] = useState('');
+  const [quickMatricStatus, setQuickMatricStatus] = useState<AttendanceStatus>('Present');
+  const [quickMatricFeedback, setQuickMatricFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [unregisteredMatricModal, setUnregisteredMatricModal] = useState<{ matric: string } | null>(null);
+  const [unregisteredStudentName, setUnregisteredStudentName] = useState('');
 
   // Filter States for Reporting Engine
   const [startDate, setStartDate] = useState<string>('');
@@ -96,14 +121,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   const [schedDay, setSchedDay] = useState<'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday'>('Monday');
   const [schedStartTime, setSchedStartTime] = useState('09:00');
   const [schedEndTime, setSchedEndTime] = useState('11:00');
-  const [schedVenue, setSchedVenue] = useState('Engineering Amphitheatre A');
+  const [schedVenue, setSchedVenue] = useState('Lecture Hall A');
 
   // Start Session Modal / State (with Custom PIN & Venue)
   const [showStartSessionModal, setShowStartSessionModal] = useState(false);
   const [sessionCourseId, setSessionCourseId] = useState(aegisStore.courses[0]?.id || '');
   const [sessionCustomPin, setSessionCustomPin] = useState('');
   const [sessionRadius, setSessionRadius] = useState<number>(75);
-  const [sessionVenue, setSessionVenue] = useState('Engineering Amphitheatre A');
+  const [sessionVenue, setSessionVenue] = useState('Lecture Hall A');
   const [sessionAnnouncement, setSessionAnnouncement] = useState('Attendance check-in is now active. Please remain seated.');
   const [sessionAutoCloseMins, setSessionAutoCloseMins] = useState(30);
   const [isStartingSession, setIsStartingSession] = useState(false);
@@ -113,7 +138,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   const [showManualMarkModal, setShowManualMarkModal] = useState(false);
   const [manualStudentId, setManualStudentId] = useState('');
   const [manualStatus, setManualStatus] = useState<AttendanceStatus>('Present');
-  const [manualReason, setManualReason] = useState('Student phone battery depleted - physically verified in class');
+  const [manualReason, setManualReason] = useState('Physically verified in classroom');
   const [manualSearchQuery, setManualSearchQuery] = useState('');
 
   // Edit PIN Modal State
@@ -352,6 +377,100 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     triggerUpdate();
   };
 
+  // --- DEPARTMENT MANAGEMENT ---
+
+  const handleSaveDepartment = (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeptError(null);
+    if (!deptNameInput.trim() || !deptCodeInput.trim()) {
+      setDeptError('Department Name and Code are required.');
+      return;
+    }
+
+    if (editingDept) {
+      aegisStore.updateDepartment(editingDept.id, deptNameInput, deptCodeInput);
+    } else {
+      aegisStore.addDepartment(deptNameInput, deptCodeInput);
+    }
+
+    setShowAddDeptModal(false);
+    setEditingDept(null);
+    setDeptNameInput('');
+    setDeptCodeInput('');
+    triggerUpdate();
+  };
+
+  const handleDeleteDepartment = (id: string) => {
+    if (confirm('Delete this department?')) {
+      const res = aegisStore.deleteDepartment(id);
+      if (!res.success) {
+        alert(res.message);
+      } else {
+        triggerUpdate();
+      }
+    }
+  };
+
+  // --- INSTITUTION NAME ---
+
+  const handleSaveInstitutionName = (e: React.FormEvent) => {
+    e.preventDefault();
+    aegisStore.setInstitutionName(institutionNameInput);
+    setShowInstitutionModal(false);
+    triggerUpdate();
+  };
+
+  // --- QUICK MANUAL ROLL CALL BY MATRIC NUMBER ---
+
+  const handleQuickMatricSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession) return;
+    setQuickMatricFeedback(null);
+    const clean = quickMatricInput.trim();
+    if (!clean) return;
+
+    const existingStudent = aegisStore.students.find(
+      (st) => st.matric_number.toLowerCase() === clean.toLowerCase()
+    );
+
+    if (!existingStudent) {
+      setUnregisteredMatricModal({ matric: clean });
+      setUnregisteredStudentName('');
+      return;
+    }
+
+    const res = aegisStore.markAttendanceByMatricNumber(
+      activeSession.id,
+      clean,
+      quickMatricStatus,
+      undefined,
+      currentUser.full_name
+    );
+
+    setQuickMatricFeedback(res);
+    setQuickMatricInput('');
+    triggerUpdate();
+  };
+
+  const handleConfirmUnregisteredStudent = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSession || !unregisteredMatricModal) return;
+
+    const res = aegisStore.markAttendanceByMatricNumber(
+      activeSession.id,
+      unregisteredMatricModal.matric,
+      quickMatricStatus,
+      unregisteredStudentName.trim() || undefined,
+      currentUser.full_name
+    );
+
+    setQuickMatricFeedback(res);
+    setUnregisteredMatricModal(null);
+    setUnregisteredStudentName('');
+    setQuickMatricInput('');
+    triggerUpdate();
+  };
+
   // --- COURSE CRUD ACTIONS ---
 
   const handleCreateCourse = (e: React.FormEvent) => {
@@ -554,6 +673,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     );
   }, [activeSession, activeSessionLogs, manualSearchQuery, tick]);
 
+  if (!isRepUnlocked) {
+    return (
+      <div className="max-w-md mx-auto my-16 px-4">
+        <div className="p-8 bg-surface-card rounded-2xl border border-surface-border shadow-academic-lg text-center animate-fade-in">
+          <div className="w-16 h-16 rounded-2xl bg-oxford-800 text-teal-brand border border-teal-brand/30 flex items-center justify-center mx-auto mb-4 shadow-md">
+            <Lock className="w-8 h-8 text-teal-brand" />
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-oxford-800 mb-1">
+            Course Rep Portal Locked
+          </h2>
+          <p className="text-xs text-slate-500 mb-6">
+            Anti-tamper protection active. Enter the Course Representative password or PIN to access live sessions, rosters, and attendance logs.
+          </p>
+
+          {unlockError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-xs text-red-700 rounded-xl text-left flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <span>{unlockError}</span>
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setUnlockError(null);
+              const valid = aegisStore.verifyUserPassword(currentUser.id, unlockPassword);
+              if (valid) {
+                setIsRepUnlocked(true);
+              } else {
+                setUnlockError('Incorrect password or PIN.');
+              }
+            }}
+            className="space-y-4"
+          >
+            <div className="relative">
+              <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                type="password"
+                required
+                autoFocus
+                placeholder="Enter Course Rep Password or PIN"
+                value={unlockPassword}
+                onChange={(e) => setUnlockPassword(e.target.value)}
+                className="w-full pl-9 pr-3 py-2.5 text-sm border border-surface-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-2.5 px-4 rounded-xl bg-oxford-800 hover:bg-oxford-700 text-white font-bold text-xs transition-colors shadow-academic flex items-center justify-center gap-2"
+            >
+              <span>Unlock Admin Hub</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
       {/* 1. Header Banner */}
@@ -577,18 +755,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           </div>
         </div>
 
-        {/* Global Reset */}
-        <button
-          onClick={() => {
-            if (confirm('Reset entire system database to initial seeded demonstration records?')) {
-              aegisStore.resetToDefaults();
-              window.location.reload();
-            }
-          }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-600 hover:text-oxford-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5" /> Reset Demo Records
-        </button>
+        {/* Workaround 1 Vault Controls & Global Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => {
+              setInstitutionNameInput(aegisStore.getInstitutionName());
+              setShowInstitutionModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-oxford-800 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors font-semibold shadow-sm"
+            title="Configure University / Faculty Name"
+          >
+            <Building2 className="w-3.5 h-3.5 text-teal-brand" /> Campus Name
+          </button>
+
+          <button
+            onClick={() => setShowSecurityModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-oxford-800 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors font-semibold shadow-sm"
+            title="Change Course Rep master password or PIN"
+          >
+            <KeyRound className="w-3.5 h-3.5 text-teal-brand" /> Rep Password
+          </button>
+
+          {aegisStore.isAdminLockEnabled() && (
+            <button
+              onClick={() => {
+                setIsRepUnlocked(false);
+                setUnlockPassword('');
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors font-semibold shadow-sm"
+              title="Lock Admin Dashboard immediately"
+            >
+              <Lock className="w-3.5 h-3.5 text-red-600" /> Lock Screen
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              const data = aegisStore.exportVaultData();
+              const blob = new Blob([data], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              const dateStr = new Date().toISOString().split('T')[0];
+              link.download = `AegisRoll_LocalVault_Backup_${dateStr}.json`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              URL.revokeObjectURL(url);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors font-semibold shadow-sm"
+            title="Download complete database backup (Workaround 1)"
+          >
+            <Download className="w-3.5 h-3.5" /> Backup Vault (JSON)
+          </button>
+
+          <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-oxford-800 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors font-semibold shadow-sm cursor-pointer">
+            <Upload className="w-3.5 h-3.5 text-teal-brand" /> Restore
+            <input
+              type="file"
+              accept=".json"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  const content = event.target?.result as string;
+                  const res = aegisStore.importVaultData(content);
+                  alert(res.message);
+                  if (res.success) {
+                    triggerUpdate();
+                    window.location.reload();
+                  }
+                };
+                reader.readAsText(file);
+              }}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            onClick={() => {
+              if (confirm('Clear all stored courses, departments, students, and attendance records from this browser vault?')) {
+                aegisStore.clearAllData();
+                window.location.reload();
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors font-semibold shadow-sm"
+            title="Clear all records and start completely clean"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Clear All Data
+          </button>
+        </div>
       </div>
 
       {/* 2. Top Navigation Tabs */}
@@ -602,7 +859,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           }`}
         >
           <Calendar className="w-4 h-4" />
-          <span>Class Schedules & Timetable ({aegisStore.schedules.length})</span>
+          <span>Class Schedules ({aegisStore.schedules.length})</span>
         </button>
 
         <button
@@ -614,7 +871,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           }`}
         >
           <Radio className="w-4 h-4 text-teal-brand animate-pulse" />
-          <span>Live Session Proctor & Fail-Safe {activeSession && '(Active)'}</span>
+          <span>Live Session Proctor {activeSession && '(Active)'}</span>
         </button>
 
         <button
@@ -626,7 +883,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           }`}
         >
           <BookOpen className="w-4 h-4" />
-          <span>Course Catalog & Offerings ({aegisStore.courses.length})</span>
+          <span>Courses ({aegisStore.courses.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('departments')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'departments'
+              ? 'border-teal-brand text-teal-dark bg-teal-brand/10'
+              : 'border-transparent text-slate-500 hover:text-oxford-800'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Departments ({aegisStore.departments.length})</span>
         </button>
 
         <button
@@ -859,23 +1128,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                       <span>Recalibrate Geofence to My Live Phone Location</span>
                     </button>
 
-                    {/* QR Code Offline Backup Buttons */}
+                    {/* QR Code Offline Backup Scanner */}
                     <button
                       onClick={() => setShowQrScannerModal(true)}
                       className="px-3.5 py-2 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold flex items-center gap-1.5 transition-colors shadow-sm"
-                      title="Scan student QR passes with phone camera without requiring student GPS"
+                      title="Scan student digital QR passes or 32-character ID cards with camera"
                     >
                       <Camera className="w-4 h-4" />
-                      <span>Scan Student QR Badges</span>
-                    </button>
-
-                    <button
-                      onClick={() => setShowSessionQrModal(true)}
-                      className="px-3 py-2 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-teal-brand font-semibold flex items-center gap-1.5 transition-colors"
-                      title="Project backup QR code for students to scan"
-                    >
-                      <QrCode className="w-4 h-4" />
-                      <span>Project Backup QR</span>
+                      <span>Scan Student Cards / Passes</span>
                     </button>
 
                     {/* Announcement Broadcast */}
@@ -887,7 +1147,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                       className="px-3 py-2 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-slate-200 font-semibold flex items-center gap-1.5 transition-colors"
                     >
                       <Bell className="w-4 h-4 text-gold-brand" />
-                      <span>Broadcast Class Notice</span>
+                      <span>Broadcast Notice</span>
                     </button>
                   </div>
 
@@ -900,10 +1160,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                     className="px-4 py-2 rounded-xl bg-gold-brand hover:bg-gold-light text-oxford-900 font-bold flex items-center gap-1.5 transition-colors shadow-sm"
                   >
                     <UserPlus className="w-4 h-4 text-oxford-900" />
-                    <span>Manual Mark-In (Fail-Safe for Dead Battery / Glitches)</span>
+                    <span>Select Student from List</span>
                   </button>
                 </div>
               </div>
+
+              {/* Course Rep Exclusive: Quick Manual Roll Call by Matriculation Number */}
+              {currentUser.role === 'admin' && (
+                <div className="bg-surface-card rounded-2xl p-5 shadow-academic border border-teal-brand/40">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-teal-brand/10 text-teal-dark flex items-center justify-center">
+                        <UserCheck className="w-4 h-4 text-teal-brand" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-oxford-800 flex items-center gap-2">
+                          <span>Quick Roll Call by Matriculation Number</span>
+                          <span className="text-[10px] bg-teal-brand/10 text-teal-dark px-2 py-0.5 rounded-full font-semibold border border-teal-brand/30">
+                            Course Rep Only
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          Type student matriculation number and press Enter to mark attendance instantly.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleQuickMatricSubmit} className="flex flex-col sm:flex-row items-stretch gap-2.5">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Enter Student Matriculation Number (e.g. UG/2024/CS/1042)..."
+                        value={quickMatricInput}
+                        onChange={(e) => setQuickMatricInput(e.target.value.toUpperCase())}
+                        className="w-full px-3.5 py-2.5 text-xs font-mono font-bold uppercase rounded-xl border border-surface-border bg-white text-oxford-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-brand"
+                      />
+                    </div>
+
+                    <select
+                      value={quickMatricStatus}
+                      onChange={(e) => setQuickMatricStatus(e.target.value as AttendanceStatus)}
+                      className="px-3 py-2 text-xs font-semibold rounded-xl border border-surface-border bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-brand"
+                    >
+                      <option value="Present">Present</option>
+                      <option value="Flagged">Flagged / Late</option>
+                      <option value="Absent">Absent</option>
+                    </select>
+
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs rounded-xl transition shadow flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Mark Attendance</span>
+                    </button>
+                  </form>
+
+                  {/* Feedback Message */}
+                  {quickMatricFeedback && (
+                    <div
+                      className={`mt-3 p-3 rounded-xl text-xs flex items-center gap-2 ${
+                        quickMatricFeedback.success
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-800 font-medium'
+                          : 'bg-red-50 border border-red-200 text-red-700'
+                      }`}
+                    >
+                      {quickMatricFeedback.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                      )}
+                      <span>{quickMatricFeedback.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Real-time Roster & Distance Telemetry from CR's Phone */}
               <div className="bg-surface-card rounded-2xl shadow-academic border border-surface-border overflow-hidden">
@@ -1112,7 +1445,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                           {dept?.code} ({dept?.name.replace('Department of ', '')})
                         </td>
                         <td className="py-3.5 px-4 text-slate-700 font-medium">
-                          {lec?.full_name || 'Dr. Gregory Adams'}
+                          {lec?.full_name || 'Unassigned Lecturer'}
                         </td>
                         <td className="py-3.5 px-4 text-center">
                           <button
@@ -1158,6 +1491,113 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: ACADEMIC DEPARTMENTS & FACULTIES                                    */}
+      {/* ========================================================================= */}
+      {activeTab === 'departments' && (
+        <div className="space-y-6">
+          <div className="bg-surface-card rounded-2xl p-6 shadow-academic border border-surface-border">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-surface-border">
+              <div>
+                <h3 className="font-serif text-lg font-bold text-oxford-800 flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-teal-brand" />
+                  Academic Departments & Faculties
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configure your university departments and faculties. Courses and student rosters are linked to departments.
+                </p>
+              </div>
+
+              <button
+                onClick={() => {
+                  setEditingDept(null);
+                  setDeptNameInput('');
+                  setDeptCodeInput('');
+                  setDeptError(null);
+                  setShowAddDeptModal(true);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center gap-2 shadow-sm shrink-0"
+              >
+                <Plus className="w-4 h-4" /> Add Department
+              </button>
+            </div>
+
+            {/* Department List */}
+            {aegisStore.departments.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                <Building2 className="w-12 h-12 mx-auto mb-3 opacity-30 text-oxford-800" />
+                <p className="font-semibold text-oxford-800 text-sm">No departments created yet</p>
+                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                  Click "Add Department" above to create your first academic department (e.g. Computer Science, Electrical Engineering).
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto mt-4">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-oxford-800/5 text-slate-600 font-bold uppercase tracking-wider text-[11px] border-b border-surface-border">
+                    <tr>
+                      <th className="px-4 py-3">Code</th>
+                      <th className="px-4 py-3">Department Name</th>
+                      <th className="px-4 py-3 text-center">Courses</th>
+                      <th className="px-4 py-3 text-center">Enrolled Students</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-border">
+                    {aegisStore.departments.map((dept) => {
+                      const coursesCount = aegisStore.courses.filter((c) => c.department_id === dept.id).length;
+                      const studentsCount = aegisStore.students.filter((s) => s.department_id === dept.id).length;
+                      return (
+                        <tr key={dept.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3 font-mono font-bold text-oxford-800">
+                            <span className="px-2 py-0.5 rounded bg-teal-brand/10 text-teal-dark border border-teal-brand/30">
+                              {dept.code}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-oxford-800">
+                            {dept.name}
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-600 font-medium">
+                            {coursesCount} course{coursesCount !== 1 ? 's' : ''}
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-600 font-medium">
+                            {studentsCount} student{studentsCount !== 1 ? 's' : ''}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setEditingDept(dept);
+                                  setDeptNameInput(dept.name);
+                                  setDeptCodeInput(dept.code);
+                                  setDeptError(null);
+                                  setShowAddDeptModal(true);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-oxford-800 hover:bg-slate-100 transition-colors"
+                                title="Edit Department"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDepartment(dept.id)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                title="Delete Department"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2090,6 +2530,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Assigned Course Lecturer</label>
+                <select
+                  value={newCourseLecturerId}
+                  onChange={(e) => setNewCourseLecturerId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                >
+                  <option value="">-- Select Assigned Lecturer --</option>
+                  {aegisStore.users
+                    .filter((u) => u.role === 'lecturer' || u.role === 'admin')
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.full_name} ({l.role === 'admin' ? 'Class Rep' : 'Faculty Lecturer'})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="autoEnrollDeptStudents"
+                  checked={autoEnrollDeptStudents}
+                  onChange={(e) => setAutoEnrollDeptStudents(e.target.checked)}
+                  className="rounded text-teal-brand focus:ring-teal-brand"
+                />
+                <label htmlFor="autoEnrollDeptStudents" className="text-xs text-slate-700 font-medium cursor-pointer">
+                  Auto-enroll all registered department students offering this course
+                </label>
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -2123,7 +2594,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                 <input
                   type="text"
                   required
-                  placeholder="e.g. David Okafor"
+                  placeholder="e.g. Student Full Name"
                   value={newStudentName}
                   onChange={(e) => setNewStudentName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border rounded-lg"
@@ -2136,7 +2607,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                   <input
                     type="text"
                     required
-                    placeholder="e.g. UG/2023/CS/1042"
+                    placeholder="e.g. UG/2024/0001"
                     value={newStudentMatric}
                     onChange={(e) => setNewStudentMatric(e.target.value)}
                     className="w-full px-3 py-2 text-xs border rounded-lg font-mono font-bold uppercase"
@@ -2161,7 +2632,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                 <input
                   type="email"
                   required
-                  placeholder="e.g. d.okafor@university.edu"
+                  placeholder="e.g. student@university.edu"
                   value={newStudentEmail}
                   onChange={(e) => setNewStudentEmail(e.target.value)}
                   className="w-full px-3 py-2 text-xs border rounded-lg"
@@ -2206,22 +2677,221 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
       {/* QR Code Modals */}
       {activeSession && (
-        <>
-          <QrCameraScannerModal
-            isOpen={showQrScannerModal}
-            onClose={() => setShowQrScannerModal(false)}
-            sessionId={activeSession.id}
-            sessionTitle={activeCourse ? `${activeCourse.course_code}: ${activeCourse.title}` : 'Active Class Session'}
-            onScanCompleted={() => triggerUpdate()}
-          />
+        <QrCameraScannerModal
+          isOpen={showQrScannerModal}
+          onClose={() => setShowQrScannerModal(false)}
+          sessionId={activeSession.id}
+          sessionTitle={activeCourse ? `${activeCourse.course_code}: ${activeCourse.title}` : 'Active Class Session'}
+          onScanCompleted={() => triggerUpdate()}
+        />
+      )}
 
-          <SessionQrProjectorModal
-            isOpen={showSessionQrModal}
-            onClose={() => setShowSessionQrModal(false)}
-            session={activeSession}
-            course={activeCourse || undefined}
-          />
-        </>
+      {/* Add / Edit Department Modal */}
+      {showAddDeptModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-oxford-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-academic-lg border border-surface-border relative">
+            <button
+              onClick={() => setShowAddDeptModal(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-oxford-800 text-teal-brand flex items-center justify-center">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-oxford-800">
+                  {editingDept ? 'Edit Academic Department' : 'Create Academic Department'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Define faculty or department title and unique course code prefix
+                </p>
+              </div>
+            </div>
+
+            {deptError && (
+              <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <span>{deptError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveDepartment} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Department Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Department of Computer Science & Engineering"
+                  value={deptNameInput}
+                  onChange={(e) => setDeptNameInput(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Department Code
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. CSC or EEE"
+                  value={deptCodeInput}
+                  onChange={(e) => setDeptCodeInput(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 text-xs border rounded-lg font-mono uppercase font-bold focus:outline-none focus:ring-2 focus:ring-teal-brand"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddDeptModal(false)}
+                  className="px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 rounded-lg transition-colors shadow-sm"
+                >
+                  {editingDept ? 'Update Department' : 'Create Department'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Campus / Institution Name Modal */}
+      {showInstitutionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-oxford-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-academic-lg border border-surface-border relative">
+            <button
+              onClick={() => setShowInstitutionModal(false)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-oxford-800 text-teal-brand flex items-center justify-center">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-oxford-800">
+                  Campus / Institution Branding
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Set the official university, college, or faculty title
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveInstitutionName} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Institution Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Federal University of Technology"
+                  value={institutionNameInput}
+                  onChange={(e) => setInstitutionNameInput(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-semibold"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInstitutionModal(false)}
+                  className="px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 rounded-lg transition-colors shadow-sm"
+                >
+                  Save Campus Name
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Unregistered Student Quick Add Modal */}
+      {unregisteredMatricModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-oxford-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-academic-lg border border-surface-border relative">
+            <button
+              onClick={() => setUnregisteredMatricModal(null)}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-oxford-800 text-teal-brand flex items-center justify-center">
+                <UserPlus className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif text-lg font-bold text-oxford-800">
+                  New Student Roll Call
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Matriculation number is not yet in this roster
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 text-xs">
+              <span className="text-slate-500">Matriculation Number:</span>
+              <div className="font-mono font-bold text-oxford-800 text-sm mt-0.5">
+                {unregisteredMatricModal.matric}
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmUnregisteredStudent} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Student Full Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Michael Adebayo"
+                  value={unregisteredStudentName}
+                  onChange={(e) => setUnregisteredStudentName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand"
+                  autoFocus
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUnregisteredMatricModal(null)}
+                  className="px-3 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-bold text-white bg-oxford-800 hover:bg-oxford-700 rounded-lg transition-colors shadow-sm"
+                >
+                  Enroll & Mark Present
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {selectedStudentForQrModal && (
@@ -2248,6 +2918,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           }}
         />
       )}
+
+      <RepSecurityModal
+        isOpen={showSecurityModal}
+        onClose={() => setShowSecurityModal(false)}
+        currentUser={currentUser}
+        onPasswordChanged={() => triggerUpdate()}
+      />
     </div>
   );
 };

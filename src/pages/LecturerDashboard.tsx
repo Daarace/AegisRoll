@@ -29,7 +29,6 @@ import { getHighAccuracyLocation, GeoErrorResult } from '../lib/geolocation';
 import { exportAttendanceToCSV, exportAttendanceToPDF, exportAttendanceToWord } from '../lib/exporters';
 import { GpsPermissionModal } from '../components/GpsPermissionModal';
 import { QrCameraScannerModal } from '../components/QrCameraScannerModal';
-import { SessionQrProjectorModal } from '../components/SessionQrProjectorModal';
 
 interface LecturerDashboardProps {
   currentUser: UserProfile;
@@ -375,15 +374,7 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
                 className="px-3.5 py-2 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
                 title="Scan student digital QR passes directly with camera"
               >
-                <Camera className="w-3.5 h-3.5" /> Scan Student QR
-              </button>
-
-              <button
-                onClick={() => setShowSessionQrModal(true)}
-                className="px-3 py-2 rounded-xl bg-oxford-700 hover:bg-oxford-600 text-teal-brand font-semibold text-xs transition-colors flex items-center gap-1.5"
-                title="Project classroom backup QR code for students without GPS"
-              >
-                <QrCode className="w-3.5 h-3.5" /> Project Backup QR
+                <Camera className="w-3.5 h-3.5" /> Scan Student ID Pass
               </button>
 
               <button
@@ -576,22 +567,13 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
 
       {/* QR Modals */}
       {activeSession && (
-        <>
-          <QrCameraScannerModal
-            isOpen={showQrScannerModal}
-            onClose={() => setShowQrScannerModal(false)}
-            sessionId={activeSession.id}
-            sessionTitle={activeCourse ? `${activeCourse.course_code}: ${activeCourse.title}` : 'Active Class Session'}
-            onScanCompleted={() => refreshData()}
-          />
-
-          <SessionQrProjectorModal
-            isOpen={showSessionQrModal}
-            onClose={() => setShowSessionQrModal(false)}
-            session={activeSession}
-            course={activeCourse || undefined}
-          />
-        </>
+        <QrCameraScannerModal
+          isOpen={showQrScannerModal}
+          onClose={() => setShowQrScannerModal(false)}
+          sessionId={activeSession.id}
+          sessionTitle={activeCourse ? `${activeCourse.course_code}: ${activeCourse.title}` : 'Active Class Session'}
+          onScanCompleted={() => refreshData()}
+        />
       )}
     </div>
   );
