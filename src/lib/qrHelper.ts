@@ -80,7 +80,7 @@ export function parseScannedStudentQr(rawText: string): {
       }
     }
   } catch {
-    // Plain text QR code (e.g. "AR-QR-CS1042" or "UG/2023/CS/1042")
+    // Plain text QR code (e.g. "AR-QR-MTH1019" or "U24MTH1019")
   }
 
   return {

@@ -122,11 +122,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
 
         // If student, create student detail record
         if (role === 'student') {
-          const cleanMatric = matricNumber.trim() || `UG/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`;
+          let cleanMatric = matricNumber.trim().toUpperCase();
+          if (!cleanMatric) {
+            cleanMatric = `U24MTH${Math.floor(1000 + Math.random() * 9000)}`;
+          } else if (/^\d{4}$/.test(cleanMatric)) {
+            cleanMatric = `U24MTH${cleanMatric}`;
+          }
           aegisStore.students.push({
             id: 'std-' + Math.random().toString(36).substring(2, 9),
             user_id: newUser.id,
-            matric_number: cleanMatric.toUpperCase(),
+            matric_number: cleanMatric,
             department_id: assignedDeptId,
             qr_code_id: `AR-QR-${cleanMatric.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`
           });
@@ -346,13 +351,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
               {role === 'student' && (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Matriculation / Student ID Number
+                    <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                      <span>Matriculation Number</span>
+                      <span className="text-[10px] text-teal-dark font-mono font-normal">Format: U24MTH####</span>
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. UG/2024/CS/1042"
+                      placeholder="e.g. U24MTH1019"
                       value={matricNumber}
                       onChange={(e) => setMatricNumber(e.target.value.toUpperCase())}
                       className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono uppercase"

@@ -65,8 +65,12 @@ export const CsvStudentImportModal: React.FC<CsvStudentImportModalProps> = ({
       return '';
     };
 
-    const matric = getVal('matric_number', 'matriculation_number', 'matric_no', 'matric', 'student_id', 'reg_no', 'regno', 'id');
+    let matric = getVal('matric_number', 'matriculation_number', 'matric_no', 'matric', 'student_id', 'reg_no', 'regno', 'id');
     if (!matric) return null;
+    matric = matric.trim().toUpperCase();
+    if (/^\d{4}$/.test(matric)) {
+      matric = `U24MTH${matric}`;
+    }
 
     const name = getVal('full_name', 'name', 'student_name', 'fullname', 'first_name', 'last_name');
     const email = getVal('email', 'student_email', 'mail', 'institutional_email');
@@ -126,10 +130,10 @@ export const CsvStudentImportModal: React.FC<CsvStudentImportModalProps> = ({
   const handleDownloadTemplate = () => {
     const csvContent =
       'matric_number,full_name,email,department_code,course_code\n' +
-      'UG/2024/CS/1001,Johnathan Doe,j.doe@university.edu,CSC,CSC 401\n' +
-      'UG/2024/CS/1002,Amara Chukwu,a.chukwu@university.edu,CSC,CSC 401\n' +
-      'UG/2024/CS/1003,Fatima Bello,f.bello@university.edu,CSC,CSC 401\n' +
-      'UG/2024/EE/2010,David Okafor,d.okafor@university.edu,EEE,EEE 312\n';
+      'U24MTH1001,Johnathan Doe,j.doe@student.edu,MTH,MTH 201\n' +
+      'U24MTH1002,Amara Chukwu,a.chukwu@student.edu,MTH,MTH 201\n' +
+      'U24MTH1019,Enoch Chinyere,e.chinyere@student.edu,MTH,MTH 201\n' +
+      'U24MTH1020,Blessing Adeleke,b.adeleke@student.edu,MTH,MTH 201\n';
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -263,9 +267,14 @@ export const CsvStudentImportModal: React.FC<CsvStudentImportModalProps> = ({
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <div className="flex items-start gap-2 text-slate-600">
                 <HelpCircle className="w-4 h-4 text-teal-brand shrink-0 mt-0.5" />
-                <span>
-                  Supported columns: <strong>matric_number</strong>, <strong>full_name</strong>, <strong>email</strong>, <strong>department_code</strong>, <strong>course_code</strong>.
-                </span>
+                <div>
+                  <p>
+                    Supported columns: <strong>matric_number</strong>, <strong>full_name</strong>, <strong>email</strong>, <strong>department_code</strong>, <strong>course_code</strong>.
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Matric format: <strong className="text-teal-brand">U24MTH####</strong> (e.g. <span className="font-mono">U24MTH1019</span>) or 4-digit serials (auto-prefixed).
+                  </p>
+                </div>
               </div>
               <button
                 type="button"

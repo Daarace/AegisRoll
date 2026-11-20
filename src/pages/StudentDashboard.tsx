@@ -196,7 +196,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
               </span>
             </div>
             <p className="text-xs text-slate-500 font-mono mt-0.5">
-              Matriculation No: <strong className="text-oxford-800">{student?.matric_number || matricInput || 'UG/2023/CS/1042'}</strong>
+              Matriculation No: <strong className="text-oxford-800">{student?.matric_number || matricInput || 'U24MTH1019'}</strong>
             </p>
           </div>
         </div>
@@ -419,7 +419,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
                       <input
                         type="text"
                         required
-                        placeholder="e.g. UG/2023/CS/1042"
+                        placeholder="e.g. U24MTH1019 (or 4-digit serial 1019)"
                         value={matricInput}
                         onChange={(e) => setMatricInput(e.target.value.toUpperCase())}
                         className="w-full px-3.5 py-2.5 text-xs border border-surface-border rounded-xl focus:border-teal-brand focus:outline-none font-mono font-bold bg-white uppercase"

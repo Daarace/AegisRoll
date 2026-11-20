@@ -342,7 +342,7 @@ class AegisStore {
     studentName?: string,
     markedBy: string = 'Course Representative'
   ): { success: boolean; message: string; log?: AttendanceLog; student?: Student } {
-    const cleanMatric = matricNumber.trim();
+    let cleanMatric = matricNumber.trim().toUpperCase();
     if (!cleanMatric) {
       return { success: false, message: 'Please enter a valid matriculation number.' };
     }
@@ -354,8 +354,21 @@ class AegisStore {
 
     // Find student by matric number (case-insensitive)
     let student = this.students.find(
-      (st) => st.matric_number.toLowerCase() === cleanMatric.toLowerCase()
+      (st) => st.matric_number.toUpperCase() === cleanMatric
     );
+
+    // Smart resolution: if 4-digit serial entered (e.g. 1019), check for U24MTH1019 or endsWith
+    if (!student && /^\d{4}$/.test(cleanMatric)) {
+      const expanded = `U24MTH${cleanMatric}`;
+      student = this.students.find(
+        (st) => st.matric_number.toUpperCase() === expanded || st.matric_number.endsWith(cleanMatric)
+      );
+      if (student) {
+        cleanMatric = student.matric_number;
+      } else {
+        cleanMatric = expanded;
+      }
+    }
 
     // If student doesn't exist yet, automatically create student record and user profile
     if (!student) {
@@ -521,15 +534,16 @@ class AegisStore {
 
     // Resolve student record
     let targetStudent = this.students.find((s) => s.id === studentIdOrMatric);
-    if (!targetStudent && matricNumber) {
+    const candidateMatric = (matricNumber || studentIdOrMatric).trim().toUpperCase();
+    if (!targetStudent && candidateMatric) {
       targetStudent = this.students.find(
-        (s) => s.matric_number.toUpperCase() === matricNumber.trim().toUpperCase()
+        (s) => s.matric_number.toUpperCase() === candidateMatric
       );
-    }
-    if (!targetStudent) {
-      targetStudent = this.students.find(
-        (s) => s.matric_number.toUpperCase() === studentIdOrMatric.trim().toUpperCase()
-      );
+      if (!targetStudent && /^\d{4}$/.test(candidateMatric)) {
+        targetStudent = this.students.find(
+          (s) => s.matric_number.toUpperCase() === `U24MTH${candidateMatric}` || s.matric_number.endsWith(candidateMatric)
+        );
+      }
     }
 
     if (!targetStudent) {
@@ -758,11 +772,14 @@ class AegisStore {
 
     rows.forEach((row, index) => {
       const lineNum = index + 1;
-      const cleanMatric = row.matric_number ? row.matric_number.trim().toUpperCase() : '';
+      let cleanMatric = row.matric_number ? row.matric_number.trim().toUpperCase() : '';
       if (!cleanMatric) {
         result.errors.push(`Row #${lineNum}: Missing matriculation number.`);
         result.skipped++;
         return;
+      }
+      if (/^\d{4}$/.test(cleanMatric)) {
+        cleanMatric = `U24MTH${cleanMatric}`;
       }
 
       const cleanName = row.full_name ? row.full_name.trim() : `Student (${cleanMatric})`;

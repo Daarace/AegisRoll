@@ -429,8 +429,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     e.preventDefault();
     if (!activeSession) return;
     setQuickMatricFeedback(null);
-    const clean = quickMatricInput.trim();
+    let clean = quickMatricInput.trim().toUpperCase();
     if (!clean) return;
+
+    // Smart resolution: if 4-digit serial entered (e.g. 1019), resolve to U24MTH1019
+    if (/^\d{4}$/.test(clean)) {
+      const matched = aegisStore.students.find(
+        (st) => st.matric_number.toUpperCase() === `U24MTH${clean}` || st.matric_number.endsWith(clean)
+      );
+      if (matched) {
+        clean = matched.matric_number;
+      } else {
+        clean = `U24MTH${clean}`;
+      }
+    }
 
     const existingStudent = aegisStore.students.find(
       (st) => st.matric_number.toLowerCase() === clean.toLowerCase()
@@ -606,11 +618,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     e.preventDefault();
     if (!newStudentName || !newStudentEmail || !newStudentMatric) return;
 
+    let cleanMatric = newStudentMatric.trim().toUpperCase();
+    if (/^\d{4}$/.test(cleanMatric)) {
+      cleanMatric = `U24MTH${cleanMatric}`;
+    }
+
     const existingMatric = aegisStore.students.find(
-      (s) => s.matric_number.toUpperCase() === newStudentMatric.trim().toUpperCase()
+      (s) => s.matric_number.toUpperCase() === cleanMatric
     );
     if (existingMatric) {
-      alert(`Student with matriculation number ${newStudentMatric} already exists.`);
+      alert(`Student with matriculation number ${cleanMatric} already exists.`);
       return;
     }
 
@@ -622,7 +639,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     };
     aegisStore.users.push(newUser);
 
-    const cleanMatric = newStudentMatric.trim().toUpperCase();
     const qrToUse = newStudentCustomQr.trim() || ('AR-QR-' + cleanMatric.replace(/[^A-Za-z0-9]/g, ''));
     const newStd: Student = {
       id: 'std-' + Math.random().toString(36).substring(2, 9),
@@ -1195,7 +1211,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                       <input
                         type="text"
                         required
-                        placeholder="Enter Student Matriculation Number (e.g. UG/2024/CS/1042)..."
+                        placeholder="Enter Matric No. or 4-digit serial (e.g. U24MTH1019 or 1019)..."
                         value={quickMatricInput}
                         onChange={(e) => setQuickMatricInput(e.target.value.toUpperCase())}
                         className="w-full px-3.5 py-2.5 text-xs font-mono font-bold uppercase rounded-xl border border-surface-border bg-white text-oxford-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-brand"
@@ -2633,11 +2649,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Matriculation No</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>Matriculation No</span>
+                    <span className="text-[10px] text-teal-dark font-mono font-normal">Format: U24MTH####</span>
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. UG/2024/0001"
+                    placeholder="e.g. U24MTH1019"
                     value={newStudentMatric}
                     onChange={(e) => setNewStudentMatric(e.target.value)}
                     className="w-full px-3 py-2 text-xs border rounded-lg font-mono font-bold uppercase"
