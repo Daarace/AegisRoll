@@ -16,6 +16,7 @@ import {
   BulkImportResult
 } from '../types';
 import { calculateHaversineDistance } from './geolocation';
+import { matchStudentByMatricOrShorthand } from './matricHelper';
 
 // Environment variables for live Supabase connection
 const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
@@ -352,22 +353,23 @@ class AegisStore {
       return { success: false, message: 'Active session not found.' };
     }
 
-    // Find student by matric number (case-insensitive)
-    let student = this.students.find(
-      (st) => st.matric_number.toUpperCase() === cleanMatric
+    // Dynamically match student (by exact matric, 4-digit serial [entry mode + serial], or dept+serial)
+    let student = matchStudentByMatricOrShorthand(
+      cleanMatric,
+      this.students,
+      session.course_id,
+      this.enrollments
     );
 
-    // Smart resolution: if 4-digit serial entered (e.g. 1019), check for U24MTH1019 or endsWith
-    if (!student && /^\d{4}$/.test(cleanMatric)) {
-      const expanded = `U24MTH${cleanMatric}`;
-      student = this.students.find(
-        (st) => st.matric_number.toUpperCase() === expanded || st.matric_number.endsWith(cleanMatric)
-      );
-      if (student) {
-        cleanMatric = student.matric_number;
-      } else {
-        cleanMatric = expanded;
-      }
+    if (student) {
+      cleanMatric = student.matric_number;
+    } else if (/^\d{4}$/.test(cleanMatric)) {
+      // Dynamic prefix derived from active course's department & entry year
+      const course = this.courses.find((c) => c.id === session.course_id);
+      const courseDept = course ? this.departments.find((d) => d.id === course.department_id) : null;
+      const deptCode = courseDept ? courseDept.code.toUpperCase() : (this.departments[0]?.code || 'GEN');
+      const year = new Date().getFullYear().toString().slice(-2);
+      cleanMatric = `U${year}${deptCode}${cleanMatric}`;
     }
 
     // If student doesn't exist yet, automatically create student record and user profile
@@ -532,18 +534,16 @@ class AegisStore {
       };
     }
 
-    // Resolve student record
-    let targetStudent = this.students.find((s) => s.id === studentIdOrMatric);
+    // Resolve student record dynamically without hardcoded departments
+    let targetStudent: Student | null | undefined = this.students.find((s) => s.id === studentIdOrMatric);
     const candidateMatric = (matricNumber || studentIdOrMatric).trim().toUpperCase();
     if (!targetStudent && candidateMatric) {
-      targetStudent = this.students.find(
-        (s) => s.matric_number.toUpperCase() === candidateMatric
+      targetStudent = matchStudentByMatricOrShorthand(
+        candidateMatric,
+        this.students,
+        session.course_id,
+        this.enrollments
       );
-      if (!targetStudent && /^\d{4}$/.test(candidateMatric)) {
-        targetStudent = this.students.find(
-          (s) => s.matric_number.toUpperCase() === `U24MTH${candidateMatric}` || s.matric_number.endsWith(candidateMatric)
-        );
-      }
     }
 
     if (!targetStudent) {
@@ -778,8 +778,17 @@ class AegisStore {
         result.skipped++;
         return;
       }
+      // If student matric is 4 digits, dynamically prefix with target department code if available
       if (/^\d{4}$/.test(cleanMatric)) {
-        cleanMatric = `U24MTH${cleanMatric}`;
+        let deptCode = 'GEN';
+        if (row.department_code) {
+          deptCode = row.department_code.trim().toUpperCase();
+        } else if (defaultDeptId) {
+          const d = this.departments.find((dep) => dep.id === defaultDeptId);
+          if (d) deptCode = d.code.toUpperCase();
+        }
+        const year = new Date().getFullYear().toString().slice(-2);
+        cleanMatric = `U${year}${deptCode}${cleanMatric}`;
       }
 
       const cleanName = row.full_name ? row.full_name.trim() : `Student (${cleanMatric})`;

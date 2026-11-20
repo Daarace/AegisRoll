@@ -123,10 +123,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
         // If student, create student detail record
         if (role === 'student') {
           let cleanMatric = matricNumber.trim().toUpperCase();
+          const dept = aegisStore.departments.find((d) => d.id === assignedDeptId);
+          const deptCode = dept ? dept.code.toUpperCase() : 'GEN';
+          const year = new Date().getFullYear().toString().slice(-2);
           if (!cleanMatric) {
-            cleanMatric = `U24MTH${Math.floor(1000 + Math.random() * 9000)}`;
+            cleanMatric = `U${year}${deptCode}1${Math.floor(100 + Math.random() * 900)}`;
           } else if (/^\d{4}$/.test(cleanMatric)) {
-            cleanMatric = `U24MTH${cleanMatric}`;
+            cleanMatric = `U${year}${deptCode}${cleanMatric}`;
           }
           aegisStore.students.push({
             id: 'std-' + Math.random().toString(36).substring(2, 9),
@@ -353,12 +356,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
                       <span>Matriculation Number</span>
-                      <span className="text-[10px] text-teal-dark font-mono font-normal">Format: U24MTH####</span>
+                      <span className="text-[10px] text-teal-dark font-mono font-normal">e.g. U24MTH1019 (1=UTME, 2=DE)</span>
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. U24MTH1019"
+                      placeholder="e.g. U24MTH1019 or U23CSC2005"
                       value={matricNumber}
                       onChange={(e) => setMatricNumber(e.target.value.toUpperCase())}
                       className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono uppercase"

@@ -64,6 +64,7 @@ import { StudentQrPassModal } from '../components/StudentQrPassModal';
 import { BindIdCardModal } from '../components/BindIdCardModal';
 import { RepSecurityModal } from '../components/RepSecurityModal';
 import { CsvStudentImportModal } from '../components/CsvStudentImportModal';
+import { matchStudentByMatricOrShorthand } from '../lib/matricHelper';
 
 interface AdminDashboardProps {
   currentUser: UserProfile;
@@ -432,20 +433,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     let clean = quickMatricInput.trim().toUpperCase();
     if (!clean) return;
 
-    // Smart resolution: if 4-digit serial entered (e.g. 1019), resolve to U24MTH1019
-    if (/^\d{4}$/.test(clean)) {
-      const matched = aegisStore.students.find(
-        (st) => st.matric_number.toUpperCase() === `U24MTH${clean}` || st.matric_number.endsWith(clean)
-      );
-      if (matched) {
-        clean = matched.matric_number;
-      } else {
-        clean = `U24MTH${clean}`;
-      }
+    // Dynamically match student by full matric, 4-digit serial (entry mode 1/2 + 3 digits), or dept+serial
+    const matched = matchStudentByMatricOrShorthand(
+      clean,
+      aegisStore.students,
+      activeSession.course_id,
+      aegisStore.enrollments
+    );
+
+    if (matched) {
+      clean = matched.matric_number;
+    } else if (/^\d{4}$/.test(clean)) {
+      // Dynamic prefix derived from active course's department & entry year
+      const course = aegisStore.courses.find((c) => c.id === activeSession.course_id);
+      const dept = course ? aegisStore.departments.find((d) => d.id === course.department_id) : null;
+      const deptCode = dept ? dept.code.toUpperCase() : (aegisStore.departments[0]?.code || 'GEN');
+      const year = new Date().getFullYear().toString().slice(-2);
+      clean = `U${year}${deptCode}${clean}`;
     }
 
     const existingStudent = aegisStore.students.find(
-      (st) => st.matric_number.toLowerCase() === clean.toLowerCase()
+      (st) => st.matric_number.toUpperCase() === clean
     );
 
     if (!existingStudent) {
@@ -620,7 +628,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
     let cleanMatric = newStudentMatric.trim().toUpperCase();
     if (/^\d{4}$/.test(cleanMatric)) {
-      cleanMatric = `U24MTH${cleanMatric}`;
+      const selectedDept = aegisStore.departments.find((d) => d.id === newStudentDeptId);
+      const deptCode = selectedDept ? selectedDept.code.toUpperCase() : 'GEN';
+      const year = new Date().getFullYear().toString().slice(-2);
+      cleanMatric = `U${year}${deptCode}${cleanMatric}`;
     }
 
     const existingMatric = aegisStore.students.find(
@@ -2651,12 +2662,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
                     <span>Matriculation No</span>
-                    <span className="text-[10px] text-teal-dark font-mono font-normal">Format: U24MTH####</span>
+                    <span className="text-[10px] text-teal-dark font-mono font-normal">e.g. U24MTH1019, U23CSC2005</span>
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. U24MTH1019"
+                    placeholder="e.g. U24MTH1019 or 4-digit serial"
                     value={newStudentMatric}
                     onChange={(e) => setNewStudentMatric(e.target.value)}
                     className="w-full px-3 py-2 text-xs border rounded-lg font-mono font-bold uppercase"

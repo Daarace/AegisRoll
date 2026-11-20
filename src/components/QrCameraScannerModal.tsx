@@ -275,7 +275,7 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
               <form onSubmit={handleManualSubmit} className="mt-2 flex gap-2">
                 <input
                   type="text"
-                  placeholder="e.g. AR-QR-MTH1019 or U24MTH1019 (or 1019)"
+                  placeholder="e.g. U24MTH1019, U23CSC2005 (or 4-digit serial 1019)"
                   value={manualCodeInput}
                   onChange={(e) => setManualCodeInput(e.target.value)}
                   className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 focus:ring-1 focus:ring-teal-brand outline-none"
