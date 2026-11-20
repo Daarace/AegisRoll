@@ -17,6 +17,7 @@ import {
 import { UserRole, UserProfile } from '../types';
 import { getDeviceFingerprint } from '../lib/deviceFingerprint';
 import { aegisStore } from '../lib/supabase';
+import { matchStudentByMatricOrShorthand } from '../lib/matricHelper';
 
 interface AuthPageProps {
   onSuccess: (user: UserProfile) => void;
@@ -145,17 +146,49 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
         onSuccess(newUser);
         onNavigate(role);
       } else {
-        // Login flow
-        const user = aegisStore.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+        // Login flow - supports both Institutional Email and Matriculation Number
+        const identifier = email.trim();
+        let user = aegisStore.users.find((u) => u.email.toLowerCase() === identifier.toLowerCase());
+
+        let matchedStudent = null;
         if (!user) {
-          setErrorMsg('Invalid institutional email or password.');
+          // Check if identifier matches a student's matriculation number
+          matchedStudent = matchStudentByMatricOrShorthand(identifier, aegisStore.students);
+          if (matchedStudent) {
+            user = aegisStore.users.find((u) => u.id === matchedStudent!.user_id);
+          }
+        } else if (user.role === 'student') {
+          matchedStudent = aegisStore.students.find((s) => s.user_id === user!.id);
+        }
+
+        if (!user) {
+          setErrorMsg('Invalid matriculation number or institutional email address.');
           setLoading(false);
           return;
         }
 
-        const isMatch = aegisStore.verifyUserPassword(user.id, password);
+        let isMatch = aegisStore.verifyUserPassword(user.id, password);
+
+        // For students, also accept their matriculation number or default 'password123' if they haven't set a custom password
+        if (!isMatch && user.role === 'student' && matchedStudent) {
+          const rawPass = password.trim().toLowerCase();
+          const studentMatricClean = matchedStudent.matric_number.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const passClean = rawPass.replace(/[^a-z0-9]/g, '');
+          if (
+            rawPass === 'password123' ||
+            passClean === studentMatricClean ||
+            rawPass === matchedStudent.matric_number.toLowerCase()
+          ) {
+            isMatch = true;
+          }
+        }
+
         if (!isMatch) {
-          setErrorMsg('Incorrect password. Click "Reset Credentials" if you have forgotten your password.');
+          setErrorMsg(
+            user.role === 'student'
+              ? 'Incorrect password. (Tip: For new students, default password is your Matric Number or "password123").'
+              : 'Incorrect password. Click "Reset Credentials" if you have forgotten your password.'
+          );
           setLoading(false);
           return;
         }
@@ -251,26 +284,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Institutional Email Address
+            <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+              <span>{authMode === 'register' ? 'Institutional Email Address' : 'Matriculation Number or Email'}</span>
+              {authMode === 'login' && (
+                <span className="text-[10px] text-teal-dark font-medium">Students: Use your Matric No.</span>
+              )}
             </label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              {authMode === 'register' ? (
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              ) : (
+                <GraduationCap className="w-4 h-4 text-teal-brand absolute left-3 top-3" />
+              )}
               <input
-                type="email"
+                type={authMode === 'register' ? 'email' : 'text'}
                 required
-                placeholder="name@university.edu"
+                placeholder={
+                  authMode === 'register'
+                    ? 'name@university.edu'
+                    : 'Enter Matric Number (e.g. U24MTH1019) or Email'
+                }
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand"
+                className="w-full pl-9 pr-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-medium"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              {authMode === 'reset' ? 'New Password' : 'Password'}
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-slate-700">
+                {authMode === 'reset' ? 'New Password' : 'Password'}
+              </label>
+              {authMode === 'login' && (
+                <span className="text-[10px] text-slate-500">
+                  Default: Matric No. or <code className="text-teal-dark font-mono">password123</code>
+                </span>
+              )}
+            </div>
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <input

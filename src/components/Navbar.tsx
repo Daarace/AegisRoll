@@ -321,6 +321,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => onNavigate('auth')}
+                    className="px-3 py-1.5 rounded-lg border border-teal-brand/40 text-teal-brand hover:bg-teal-brand/10 font-semibold text-xs transition-colors hidden sm:flex items-center gap-1.5"
+                  >
+                    <GraduationCap className="w-3.5 h-3.5" />
+                    <span>Student Portal</span>
+                  </button>
+                  <button
+                    onClick={() => onNavigate('auth')}
                     className="px-3.5 py-1.5 rounded-lg bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors shadow-sm"
                   >
                     Sign In

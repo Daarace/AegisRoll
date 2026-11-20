@@ -301,23 +301,36 @@ class AegisStore {
     return true;
   }
 
-  resetPasswordByEmail(email: string, newPass: string): { success: boolean; message: string } {
-    const user = this.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+  resetPasswordByEmail(emailOrMatric: string, newPass: string): { success: boolean; message: string } {
+    const clean = emailOrMatric.trim().toLowerCase();
+    let user = this.users.find((u) => u.email.toLowerCase() === clean);
     if (!user) {
-      return { success: false, message: 'No registered account found with this institutional email.' };
+      const student = matchStudentByMatricOrShorthand(clean, this.students);
+      if (student) {
+        user = this.users.find((u) => u.id === student.user_id);
+      }
+    }
+    if (!user) {
+      return { success: false, message: 'No registered account found with this matriculation number or institutional email.' };
     }
     user.password = newPass.trim();
     if (this.currentUser?.id === user.id) {
       this.currentUser.password = newPass.trim();
     }
     this.save();
-    return { success: true, message: `Password for ${user.email} has been successfully reset.` };
+    return { success: true, message: `Password for ${user.full_name} has been successfully reset.` };
   }
 
   verifyUserPassword(emailOrId: string, passAttempt: string): boolean {
-    const user = this.users.find(
+    let user = this.users.find(
       (u) => u.id === emailOrId || u.email.toLowerCase() === emailOrId.toLowerCase()
     );
+    if (!user) {
+      const student = matchStudentByMatricOrShorthand(emailOrId, this.students);
+      if (student) {
+        user = this.users.find((u) => u.id === student.user_id);
+      }
+    }
     if (!user || !user.password) return false;
     return user.password === passAttempt.trim();
   }

@@ -64,7 +64,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               onClick={() => onNavigate('auth')}
               className="px-6 py-3.5 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-sm transition-all shadow-academic flex items-center gap-2 group"
             >
-              <span>Access Academic Portal / Sign In</span>
+              <GraduationCap className="w-5 h-5 text-oxford-900" />
+              <span>Student Check-In / Sign In</span>
               <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
             </button>
 
