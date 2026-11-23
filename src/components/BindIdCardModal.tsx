@@ -67,28 +67,47 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
       if (html5QrCodeRef.current && isScanningRef.current) return;
 
       const qrScanner = new Html5Qrcode(containerId, {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.DATA_MATRIX
+        ],
         verbose: false
       });
       html5QrCodeRef.current = qrScanner;
 
-      await qrScanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0
-        },
-        (decodedText) => {
-          const trimmed = decodedText.trim();
-          setScannedToken(trimmed);
-          setManualInput(trimmed);
-          playSuccessChime();
-        },
-        () => {
-          // Frame polling noise, ignore
-        }
-      );
+      const scanConfig = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0
+      };
+
+      const onScanSuccess = (decodedText: string) => {
+        const trimmed = decodedText.trim();
+        setScannedToken(trimmed);
+        setManualInput(trimmed);
+        playSuccessChime();
+      };
+
+      try {
+        await qrScanner.start(
+          { facingMode: 'environment' },
+          scanConfig,
+          onScanSuccess,
+          () => {}
+        );
+      } catch (backCamErr) {
+        await qrScanner.start(
+          { facingMode: 'user' },
+          scanConfig,
+          onScanSuccess,
+          () => {}
+        );
+      }
 
       isScanningRef.current = true;
       setScannerActive(true);

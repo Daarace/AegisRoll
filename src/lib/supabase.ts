@@ -685,6 +685,15 @@ class AegisStore {
     );
 
     if (!targetStudent) {
+      targetStudent = matchStudentByMatricOrShorthand(
+        rawTrimmed,
+        this.students,
+        session.course_id,
+        this.enrollments
+      ) || undefined;
+    }
+
+    if (!targetStudent) {
       return {
         success: false,
         status: 'Error',

@@ -118,25 +118,42 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
       }
 
       const qrCodeScanner = new Html5Qrcode(containerId, {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.DATA_MATRIX
+        ],
         verbose: false
       });
       html5QrCodeRef.current = qrCodeScanner;
 
-      await qrCodeScanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0
-        },
-        (decodedText) => {
-          handleProcessCode(decodedText);
-        },
-        () => {
-          // Frame decode error - normal polling noise, ignore
-        }
-      );
+      const scanConfig = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0
+      };
+
+      try {
+        // Try rear/environment camera first (ideal for phones)
+        await qrCodeScanner.start(
+          { facingMode: 'environment' },
+          scanConfig,
+          (decodedText) => handleProcessCode(decodedText),
+          () => {}
+        );
+      } catch (backCamErr) {
+        // Fallback to any available camera / front webcam (laptops, desktops)
+        await qrCodeScanner.start(
+          { facingMode: 'user' },
+          scanConfig,
+          (decodedText) => handleProcessCode(decodedText),
+          () => {}
+        );
+      }
 
       isScanningRef.current = true;
       setScannerActive(true);
