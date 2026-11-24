@@ -1037,6 +1037,82 @@ class AegisStore {
     return null;
   }
 
+  // Pre-Deployment & Historical Attendance Recording (Backdating Past Weeks)
+  recordHistoricalSession(params: {
+    course_id: string;
+    lecturer_id: string;
+    session_date: string;
+    week_label?: string;
+    venue?: string;
+    present_student_ids: string[];
+    absent_student_ids?: string[];
+    notes?: string;
+  }): { session: ClassSession; logsCreated: number } {
+    const sessionDate = new Date(params.session_date);
+    const validDateStr = isNaN(sessionDate.getTime()) ? new Date().toISOString() : sessionDate.toISOString();
+
+    const newSession: ClassSession = {
+      id: 'ses-hist-' + Math.random().toString(36).substring(2, 9),
+      course_id: params.course_id,
+      lecturer_id: params.lecturer_id,
+      session_pin: 'PAST',
+      start_time: validDateStr,
+      end_time: validDateStr,
+      is_active: false,
+      admin_lat: 0,
+      admin_lon: 0,
+      geofence_radius_meters: 0,
+      venue: params.venue || 'Classroom (Pre-Deployment Register)',
+      announcement: params.week_label ? `Historical Session: ${params.week_label}` : 'Pre-deployment historical session',
+      auto_close_minutes: 0,
+      anchor_device_name: 'Pre-Deployment Paper Register / Archive'
+    };
+
+    this.sessions.unshift(newSession);
+
+    let logsCount = 0;
+    params.present_student_ids.forEach((studentId) => {
+      this.logs.unshift({
+        id: 'log-' + Math.random().toString(36).substring(2, 9),
+        session_id: newSession.id,
+        student_id: studentId,
+        checked_in_at: validDateStr,
+        student_lat: 0,
+        student_lon: 0,
+        gps_accuracy_meters: 0,
+        distance_calculated: 0,
+        status: 'Present',
+        marked_by: 'historical_archive',
+        manual_reason: `Pre-deployment register entry (${params.week_label || 'Past Week'})`,
+        notes: params.notes || 'Retroactive entry before AegisRoll deployment'
+      });
+      logsCount++;
+    });
+
+    if (params.absent_student_ids) {
+      params.absent_student_ids.forEach((studentId) => {
+        this.logs.unshift({
+          id: 'log-' + Math.random().toString(36).substring(2, 9),
+          session_id: newSession.id,
+          student_id: studentId,
+          checked_in_at: validDateStr,
+          student_lat: 0,
+          student_lon: 0,
+          gps_accuracy_meters: 0,
+          distance_calculated: 0,
+          status: 'Absent',
+          marked_by: 'historical_archive',
+          manual_reason: `Pre-deployment register absence (${params.week_label || 'Past Week'})`,
+          notes: params.notes || 'Retroactive entry before AegisRoll deployment'
+        });
+        logsCount++;
+      });
+    }
+
+    this.save();
+    return { session: newSession, logsCreated: logsCount };
+  }
+
   // Geofence Fail-Safe: Recalibrate anchor to CR's live phone GPS
   recalibrateSessionAnchor(
     sessionId: string,

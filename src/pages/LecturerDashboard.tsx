@@ -21,12 +21,20 @@ import {
   Sparkles,
   Layers,
   Camera,
-  QrCode
+  QrCode,
+  Calendar,
+  History,
+  CheckSquare,
+  SquareCheck,
+  FileCheck,
+  UploadCloud
 } from 'lucide-react';
 import { UserProfile, Course, ClassSession, AttendanceLog, Student } from '../types';
 import { aegisStore, subscribeToSessionAttendance } from '../lib/supabase';
 import { getHighAccuracyLocation, GeoErrorResult } from '../lib/geolocation';
 import { exportAttendanceToCSV, exportAttendanceToPDF, exportAttendanceToWord } from '../lib/exporters';
+import { generateQrDataUrl, buildSessionBackupQrPayload } from '../lib/qrHelper';
+import { matchStudentByMatricOrShorthand } from '../lib/matricHelper';
 import { GpsPermissionModal } from '../components/GpsPermissionModal';
 import { QrCameraScannerModal } from '../components/QrCameraScannerModal';
 
@@ -49,6 +57,22 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
   const [showProjectionModal, setShowProjectionModal] = useState(false);
   const [showQrScannerModal, setShowQrScannerModal] = useState(false);
   const [showSessionQrModal, setShowSessionQrModal] = useState(false);
+  const [sessionQrDataUrl, setSessionQrDataUrl] = useState<string>('');
+  const [showQuickScanCourseSelectModal, setShowQuickScanCourseSelectModal] = useState(false);
+
+  // Past Attendance / Historical Entry States
+  const [showPastAttendanceModal, setShowPastAttendanceModal] = useState(false);
+  const [pastCourseId, setPastCourseId] = useState<string>('');
+  const [pastWeekLabel, setPastWeekLabel] = useState<string>('Week 1');
+  const [pastDate, setPastDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split('T')[0];
+  });
+  const [pastSelectedStudentIds, setPastSelectedStudentIds] = useState<string[]>([]);
+  const [pastPasteMatricText, setPastPasteMatricText] = useState<string>('');
+  const [pastNotes, setPastNotes] = useState<string>('Pre-deployment register entry from paper sign-in sheet');
+  const [pastSuccessMessage, setPastSuccessMessage] = useState<string | null>(null);
 
   const refreshData = () => {
     // Find courses assigned to this lecturer
@@ -94,6 +118,104 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
 
     return () => unsubscribe();
   }, [activeSession?.id]);
+
+  // Generate dynamic QR Code for active session for auditorium projection
+  useEffect(() => {
+    if (activeSession) {
+      const payload = buildSessionBackupQrPayload(activeSession);
+      generateQrDataUrl(payload, { width: 320, darkColor: '#0F2137', lightColor: '#FFFFFF' })
+        .then(setSessionQrDataUrl)
+        .catch((err) => console.error('Failed to generate session QR code:', err));
+    } else {
+      setSessionQrDataUrl('');
+    }
+  }, [activeSession?.id]);
+
+  const handleOpenPastAttendanceModal = (courseId?: string) => {
+    const cId = courseId || selectedCourseId || assignedCourses[0]?.id || '';
+    setPastCourseId(cId);
+    const enrolledIds = aegisStore.enrollments
+      .filter((e) => e.course_id === cId)
+      .map((e) => e.student_id);
+    setPastSelectedStudentIds(enrolledIds);
+    setPastSuccessMessage(null);
+    setPastPasteMatricText('');
+    setShowPastAttendanceModal(true);
+  };
+
+  const handleApplyPastedMatrics = () => {
+    if (!pastPasteMatricText.trim()) return;
+    const tokens = pastPasteMatricText
+      .split(/[\n,;\t ]+/)
+      .map((t) => t.trim().toUpperCase())
+      .filter((t) => t.length >= 3);
+
+    const cId = pastCourseId || selectedCourseId || assignedCourses[0]?.id;
+    const matchedStudentIds: string[] = [];
+
+    tokens.forEach((token) => {
+      let matched = aegisStore.students.find(
+        (s) => s.matric_number.toUpperCase() === token || s.matric_number.toUpperCase().includes(token)
+      );
+      if (!matched) {
+        matched = matchStudentByMatricOrShorthand(token, aegisStore.students, cId, aegisStore.enrollments) || undefined;
+      }
+      if (matched && !matchedStudentIds.includes(matched.id)) {
+        matchedStudentIds.push(matched.id);
+      }
+    });
+
+    setPastSelectedStudentIds((prev) => Array.from(new Set([...prev, ...matchedStudentIds])));
+  };
+
+  const handleSavePastAttendance = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cId = pastCourseId || selectedCourseId || assignedCourses[0]?.id;
+    if (!cId) {
+      alert('Please select a course for historical attendance.');
+      return;
+    }
+
+    const enrolledStudents = aegisStore.enrollments
+      .filter((e) => e.course_id === cId)
+      .map((e) => aegisStore.students.find((s) => s.id === e.student_id))
+      .filter(Boolean) as Student[];
+
+    const allEnrolledIds = enrolledStudents.map((s) => s.id);
+    const absentIds = allEnrolledIds.filter((id) => !pastSelectedStudentIds.includes(id));
+
+    aegisStore.recordHistoricalSession({
+      course_id: cId,
+      lecturer_id: currentUser.id,
+      session_date: pastDate,
+      week_label: pastWeekLabel,
+      venue: 'Classroom (Pre-Deployment Register)',
+      present_student_ids: pastSelectedStudentIds,
+      absent_student_ids: absentIds,
+      notes: pastNotes
+    });
+
+    refreshData();
+    const course = aegisStore.courses.find((c) => c.id === cId);
+    setPastSuccessMessage(
+      `✓ Successfully recorded historical attendance for ${course?.course_code || 'Course'} (${pastWeekLabel})! ${pastSelectedStudentIds.length} students marked Present, ${absentIds.length} marked Absent. Historical attendance is now included in all audit exports.`
+    );
+  };
+
+  const handleLaunchQuickScanner = (courseId: string) => {
+    const newSession = aegisStore.createSession({
+      course_id: courseId,
+      lecturer_id: currentUser.id,
+      admin_lat: 40.712776,
+      admin_lon: -74.005974,
+      geofence_radius_meters: 100,
+      venue: 'Lecturer Podium Scanner',
+      announcement: 'Lecturer direct QR pass scanner session'
+    });
+    setActiveSession(newSession);
+    setShowQuickScanCourseSelectModal(false);
+    setShowQrScannerModal(true);
+  };
 
   const handleStartSession = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,16 +315,38 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
           </div>
         </div>
 
-        {/* Quick status indicator */}
-        <div className="flex items-center gap-3">
+        {/* Quick action controls & status */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => handleOpenPastAttendanceModal()}
+            className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-oxford-800 font-bold text-xs transition-colors flex items-center gap-1.5 border border-slate-200 shadow-sm"
+            title="Record historical / pre-deployment attendance for past weeks"
+          >
+            <History className="w-3.5 h-3.5 text-oxford-600" /> Log Past Weeks
+          </button>
+
+          <button
+            onClick={() => {
+              if (activeSession) {
+                setShowQrScannerModal(true);
+              } else {
+                setShowQuickScanCourseSelectModal(true);
+              }
+            }}
+            className="px-3.5 py-2 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
+            title="Scan student digital QR passes directly with device camera"
+          >
+            <Camera className="w-3.5 h-3.5" /> Scan Student QR Pass
+          </button>
+
           {activeSession ? (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-              <span>Session In Progress (PIN: {activeSession.session_pin})</span>
+              <span>PIN: {activeSession.session_pin}</span>
             </div>
           ) : (
-            <div className="text-xs text-slate-500 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-slate-400" /> No session active
+            <div className="text-xs text-slate-500 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200">
+              <Clock className="w-3.5 h-3.5 text-slate-400" /> Standby
             </div>
           )}
         </div>
@@ -512,10 +656,10 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
         </div>
       )}
 
-      {/* Projection Mode Modal (Extra Large PIN Display) */}
+      {/* Projection Mode Modal (Extra Large PIN & Dynamic QR Display) */}
       {showProjectionModal && activeSession && (
-        <div className="fixed inset-0 bg-oxford-900/95 z-50 flex items-center justify-center p-6 backdrop-blur-md">
-          <div className="max-w-2xl w-full text-center text-white space-y-8 relative">
+        <div className="fixed inset-0 bg-oxford-900/95 z-50 flex items-center justify-center p-6 backdrop-blur-md overflow-y-auto">
+          <div className="max-w-3xl w-full text-center text-white space-y-6 relative my-auto">
             <button
               onClick={() => setShowProjectionModal(false)}
               className="absolute top-0 right-0 p-2 text-slate-400 hover:text-white"
@@ -531,20 +675,46 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
                 {activeCourse?.course_code}: {activeCourse?.title}
               </h2>
               <p className="text-sm text-slate-300 mt-1">
-                Open <span className="text-teal-brand font-bold underline">AegisRoll</span> on your mobile browser and enter this PIN
+                Open <span className="text-teal-brand font-bold underline">AegisRoll</span> on your mobile device to check in
               </p>
             </div>
 
-            {/* Huge PIN Card */}
-            <div className="p-10 rounded-3xl bg-oxford-800 border-2 border-teal-brand/40 shadow-2xl relative overflow-hidden">
-              <div className="absolute inset-0 bg-[radial-gradient(#26B9A8_1px,transparent_1px)] [background-size:16px_16px] opacity-10" />
-              <div className="font-mono text-7xl sm:text-9xl font-black tracking-[0.25em] text-gold-brand select-all">
-                {activeSession.session_pin}
+            {/* Display Both QR Code and PIN */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              {/* Dynamic Session QR Code */}
+              <div className="p-6 rounded-3xl bg-white text-oxford-900 border-2 border-teal-brand/40 shadow-2xl flex flex-col items-center justify-center space-y-3">
+                <span className="text-xs font-bold tracking-wider uppercase text-teal-dark bg-teal-50 px-3 py-1 rounded-full border border-teal-200">
+                  Option 1: Scan With Camera
+                </span>
+                {sessionQrDataUrl ? (
+                  <img
+                    src={sessionQrDataUrl}
+                    alt="Class Session QR Pass"
+                    className="w-48 h-48 sm:w-56 sm:h-56 object-contain rounded-xl shadow-inner border border-slate-100"
+                  />
+                ) : (
+                  <div className="w-48 h-48 flex items-center justify-center bg-slate-100 rounded-xl">
+                    <RefreshCw className="w-8 h-8 animate-spin text-teal-brand" />
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-500 font-medium text-center">
+                  Students scan this QR code to check in instantly without typing
+                </p>
               </div>
-              <div className="mt-4 flex items-center justify-center gap-4 text-xs text-slate-300">
-                <span>Podium Geofence: <strong>{activeSession.geofence_radius_meters}m</strong></span>
-                <span>•</span>
-                <span>Live Check-Ins: <strong>{presentCount} Present</strong></span>
+
+              {/* Huge PIN Card */}
+              <div className="p-8 rounded-3xl bg-oxford-800 border-2 border-teal-brand/40 shadow-2xl relative overflow-hidden flex flex-col items-center justify-center text-center space-y-3">
+                <div className="absolute inset-0 bg-[radial-gradient(#26B9A8_1px,transparent_1px)] [background-size:16px_16px] opacity-10" />
+                <span className="text-xs font-bold tracking-wider uppercase text-gold-brand bg-gold-brand/10 px-3 py-1 rounded-full border border-gold-brand/30">
+                  Option 2: Enter PIN
+                </span>
+                <div className="font-mono text-6xl sm:text-7xl font-black tracking-[0.2em] text-gold-brand select-all py-4">
+                  {activeSession.session_pin}
+                </div>
+                <div className="text-xs text-slate-300 space-y-1">
+                  <div>Podium Geofence: <strong>{activeSession.geofence_radius_meters}m</strong></div>
+                  <div>Live Check-Ins: <strong className="text-emerald-400">{presentCount} Present</strong></div>
+                </div>
               </div>
             </div>
 
@@ -554,6 +724,298 @@ export const LecturerDashboard: React.FC<LecturerDashboardProps> = ({ currentUse
             >
               Return to Live Monitor
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pre-Deployment & Past Weeks Attendance Entry Modal */}
+      {showPastAttendanceModal && (
+        <div className="fixed inset-0 bg-oxford-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-surface-card rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-surface-border my-8 space-y-6">
+            <div className="flex items-center justify-between border-b border-surface-border pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-oxford-800 text-teal-brand">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-oxford-800">
+                    Log Past Weeks / Pre-Deployment Attendance
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Record historical attendance for weeks prior to AegisRoll deployment
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPastAttendanceModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {pastSuccessMessage && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium space-y-2">
+                <div className="flex items-center gap-2 font-bold text-emerald-900">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  Historical Attendance Recorded!
+                </div>
+                <p>{pastSuccessMessage}</p>
+                <div className="pt-2 flex gap-2">
+                  <button
+                    onClick={() => {
+                      setPastSuccessMessage(null);
+                      const match = pastWeekLabel.match(/Week (\d+)/i);
+                      if (match) {
+                        setPastWeekLabel(`Week ${parseInt(match[1]) + 1}`);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                  >
+                    Log Next Week
+                  </button>
+                  <button
+                    onClick={() => setShowPastAttendanceModal(false)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs"
+                  >
+                    Done & Close
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSavePastAttendance} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Select Course
+                  </label>
+                  <select
+                    value={pastCourseId || selectedCourseId}
+                    onChange={(e) => {
+                      setPastCourseId(e.target.value);
+                      const enrolled = aegisStore.enrollments
+                        .filter((enr) => enr.course_id === e.target.value)
+                        .map((enr) => enr.student_id);
+                      setPastSelectedStudentIds(enrolled);
+                    }}
+                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-brand bg-white"
+                  >
+                    {assignedCourses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.course_code} - {c.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Academic Week
+                  </label>
+                  <select
+                    value={pastWeekLabel}
+                    onChange={(e) => setPastWeekLabel(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-brand bg-white"
+                  >
+                    {['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7', 'Week 8', 'Week 9', 'Week 10'].map((w) => (
+                      <option key={w} value={w}>{w}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                    Historical Session Date
+                  </label>
+                  <input
+                    type="date"
+                    value={pastDate}
+                    onChange={(e) => setPastDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-surface-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-brand bg-white font-medium"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Paste or Quick-Filter Matrics */}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-oxford-800 flex items-center gap-1.5">
+                    <FileCheck className="w-3.5 h-3.5 text-teal-brand" /> Quick-Paste Present Matrics (Optional)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleApplyPastedMatrics}
+                    className="px-2.5 py-1 text-xs font-bold text-teal-dark bg-teal-brand/10 hover:bg-teal-brand/20 rounded-lg transition-colors"
+                  >
+                    Apply Matrics
+                  </button>
+                </div>
+                <textarea
+                  value={pastPasteMatricText}
+                  onChange={(e) => setPastPasteMatricText(e.target.value)}
+                  placeholder="Paste student matric numbers from physical sign-in sheet (comma, space, or newline separated)..."
+                  rows={2}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand bg-white font-mono"
+                />
+              </div>
+
+              {/* Student Checklist */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Enrolled Students ({pastSelectedStudentIds.length} of {
+                      aegisStore.enrollments.filter((e) => e.course_id === (pastCourseId || selectedCourseId || assignedCourses[0]?.id)).length
+                    } marked Present)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allIds = aegisStore.enrollments
+                          .filter((e) => e.course_id === (pastCourseId || selectedCourseId || assignedCourses[0]?.id))
+                          .map((e) => e.student_id);
+                        setPastSelectedStudentIds(allIds);
+                      }}
+                      className="text-[11px] text-teal-brand hover:underline font-bold"
+                    >
+                      Select All Present
+                    </button>
+                    <span className="text-slate-300">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setPastSelectedStudentIds([])}
+                      className="text-[11px] text-slate-500 hover:underline"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-56 overflow-y-auto border border-surface-border rounded-xl divide-y divide-surface-border bg-white">
+                  {aegisStore.enrollments
+                    .filter((e) => e.course_id === (pastCourseId || selectedCourseId || assignedCourses[0]?.id))
+                    .map((enr) => {
+                      const student = aegisStore.students.find((s) => s.id === enr.student_id);
+                      if (!student) return null;
+                      const user = aegisStore.users.find((u) => u.id === student.user_id);
+                      const isChecked = pastSelectedStudentIds.includes(student.id);
+
+                      return (
+                        <label
+                          key={student.id}
+                          className="flex items-center justify-between p-2.5 hover:bg-slate-50 cursor-pointer text-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setPastSelectedStudentIds((prev) => [...prev, student.id]);
+                                } else {
+                                  setPastSelectedStudentIds((prev) => prev.filter((id) => id !== student.id));
+                                }
+                              }}
+                              className="rounded text-teal-brand focus:ring-teal-brand"
+                            />
+                            <div>
+                              <span className="font-semibold text-oxford-800">{user?.full_name || 'Student'}</span>
+                              <span className="ml-2 font-mono text-[11px] text-slate-500">({student.matric_number})</span>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            isChecked ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {isChecked ? 'Present' : 'Absent'}
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                  Audit Notes / Reason
+                </label>
+                <input
+                  type="text"
+                  value={pastNotes}
+                  onChange={(e) => setPastNotes(e.target.value)}
+                  placeholder="e.g. Transcribed from paper roll-call sheet approved by Course Lecturer"
+                  className="w-full px-3 py-2 text-xs border border-surface-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-brand bg-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-surface-border">
+                <button
+                  type="button"
+                  onClick={() => setShowPastAttendanceModal(false)}
+                  className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-oxford-800 hover:bg-oxford-700 text-white text-xs font-bold rounded-xl shadow-md transition-colors flex items-center gap-1.5"
+                >
+                  <History className="w-4 h-4 text-teal-brand" /> Save Historical Attendance Record
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Scan Course Selector Modal (When no session is currently active) */}
+      {showQuickScanCourseSelectModal && (
+        <div className="fixed inset-0 bg-oxford-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-2xl border border-surface-border space-y-4">
+            <div className="flex items-center justify-between border-b border-surface-border pb-3">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-teal-brand" />
+                <h3 className="font-serif text-lg font-bold text-oxford-800">
+                  Launch QR Scanner
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowQuickScanCourseSelectModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              To scan student digital QR passes, select the course. AegisRoll will initialize a secure live session anchor and open your device camera immediately.
+            </p>
+
+            <div className="space-y-3 pt-2">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700">
+                Choose Target Course
+              </label>
+              <select
+                value={selectedCourseId}
+                onChange={(e) => setSelectedCourseId(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs border border-surface-border rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-brand bg-white font-medium"
+              >
+                {assignedCourses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.course_code} - {c.title}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => handleLaunchQuickScanner(selectedCourseId || assignedCourses[0]?.id)}
+                className="w-full py-3 rounded-xl bg-teal-brand hover:bg-teal-hover text-oxford-900 font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-md"
+              >
+                <Camera className="w-4 h-4" /> Start Scanner Session
+              </button>
+            </div>
           </div>
         </div>
       )}

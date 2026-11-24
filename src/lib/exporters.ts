@@ -181,21 +181,43 @@ export function exportAttendanceToPDF(
     margin: { left: 14, right: 14, bottom: 35 }
   });
 
-  // 5. Verification & Dean Sign-off Footer Block
+  // 5. Verification & Academic Sign-off Footer Block (Lecturer, Class Rep, HOD)
   const finalY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY + 12 : 220;
-  const footerY = Math.min(finalY, 250);
+  const footerY = Math.min(finalY, 245);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(15, 33, 55);
 
-  // Left signature
-  doc.line(14, footerY + 15, 75, footerY + 15);
-  doc.text('Course Lecturer Signature', 14, footerY + 20);
+  // 1. Course Lecturer Signature (Left)
+  doc.line(14, footerY + 15, 68, footerY + 15);
+  doc.text('Course Lecturer', 14, footerY + 19);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sign & Date', 14, footerY + 23);
 
-  // Right signature
-  doc.line(pageWidth - 75, footerY + 15, pageWidth - 14, footerY + 15);
-  doc.text('Faculty Dean / Academic Registrar', pageWidth - 75, footerY + 20);
+  // 2. Class Representative Signature (Center)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(15, 33, 55);
+  doc.line(78, footerY + 15, 132, footerY + 15);
+  doc.text('Class Representative (Class Rep)', 78, footerY + 19);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sign & Date', 78, footerY + 23);
+
+  // 3. Head of Department Signature (Right)
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(15, 33, 55);
+  doc.line(142, footerY + 15, 196, footerY + 15);
+  doc.text('Head of Department (HOD)', 142, footerY + 19);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sign & Date / Stamp', 142, footerY + 23);
 
   // Bottom Security Notice
   doc.setFont('helvetica', 'italic');
@@ -350,7 +372,7 @@ export async function exportAttendanceToWord(
           new Paragraph({
             children: [
               new TextRun({
-                text: 'Registrar & Academic Affairs Certification',
+                text: 'Academic Endorsement & Certification',
                 bold: true,
                 size: 20,
                 color: '0F2137'
@@ -360,7 +382,7 @@ export async function exportAttendanceToWord(
           new Paragraph({
             children: [
               new TextRun({
-                text: 'I hereby certify that this attendance record has been generated in accordance with institution attendance regulations and geofence verification protocols.',
+                text: 'We hereby certify that this attendance audit record accurately reflects student participation for the designated academic period in accordance with departmental regulations.',
                 italics: true,
                 color: '64748B',
                 size: 18
@@ -368,9 +390,45 @@ export async function exportAttendanceToWord(
             ]
           }),
           new Paragraph({ text: '' }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Sign: ____________________________        Date: ____________________' })
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: {
+              top: { style: BorderStyle.NONE },
+              bottom: { style: BorderStyle.NONE },
+              left: { style: BorderStyle.NONE },
+              right: { style: BorderStyle.NONE },
+              insideHorizontal: { style: BorderStyle.NONE },
+              insideVertical: { style: BorderStyle.NONE }
+            },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    width: { size: 33, type: WidthType.PERCENTAGE },
+                    children: [
+                      new Paragraph({ children: [new TextRun({ text: '___________________________', bold: true })] }),
+                      new Paragraph({ children: [new TextRun({ text: 'Course Lecturer', bold: true, size: 18, color: '0F2137' })] }),
+                      new Paragraph({ children: [new TextRun({ text: 'Sign & Date: ______________', size: 16, color: '64748B' })] })
+                    ]
+                  }),
+                  new TableCell({
+                    width: { size: 34, type: WidthType.PERCENTAGE },
+                    children: [
+                      new Paragraph({ children: [new TextRun({ text: '___________________________', bold: true })] }),
+                      new Paragraph({ children: [new TextRun({ text: 'Class Representative (Class Rep)', bold: true, size: 18, color: '0F2137' })] }),
+                      new Paragraph({ children: [new TextRun({ text: 'Sign & Date: ______________', size: 16, color: '64748B' })] })
+                    ]
+                  }),
+                  new TableCell({
+                    width: { size: 33, type: WidthType.PERCENTAGE },
+                    children: [
+                      new Paragraph({ children: [new TextRun({ text: '___________________________', bold: true })] }),
+                      new Paragraph({ children: [new TextRun({ text: 'Head of Department (HOD)', bold: true, size: 18, color: '0F2137' })] }),
+                      new Paragraph({ children: [new TextRun({ text: 'Sign & Date: ______________', size: 16, color: '64748B' })] })
+                    ]
+                  })
+                ]
+              })
             ]
           })
         ]
