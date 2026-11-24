@@ -73,8 +73,24 @@ export function buildSessionBackupQrPayload(session: ClassSession): string {
 }
 
 /**
+ * Tests whether a string resembles an academic matriculation number
+ * rather than a random card token, chip UID, or hash.
+ */
+export function isLikelyMatricNumber(text: string): boolean {
+  if (!text) return false;
+  const clean = text.trim().toUpperCase();
+  // Standard format: U24MTH1019, U23CSC2005, etc.
+  if (/^[A-Z]\d{2}[A-Z]{2,5}[12]\d{3,}$/.test(clean)) return true;
+  // University slash/hyphen formats: e.g. "20/55EC012", "CSC/2021/045", "ENG-20-104"
+  if (/^[A-Z0-9]{2,6}[\/\-][A-Z0-9]{2,6}[\/\-][A-Z0-9]{2,6}$/.test(clean)) return true;
+  // Dept + 4 digits: "MTH1019", "CSC2005"
+  if (/^[A-Z]{2,5}\d{4}$/.test(clean)) return true;
+  return false;
+}
+
+/**
  * Parses the raw text decoded by the camera scanner into a normalized student identifier.
- * Supports AegisRoll JSON passes, direct URLs, barcodes, and raw matric numbers.
+ * Supports AegisRoll JSON passes, direct URLs, barcodes, and raw physical ID card tokens.
  */
 export function parseScannedStudentQr(rawText: string): {
   qrId: string;
@@ -104,20 +120,21 @@ export function parseScannedStudentQr(rawText: string): {
     const parsed = JSON.parse(trimmed);
     if (parsed && typeof parsed === 'object') {
       if (parsed.type === 'AEGISROLL_STUDENT_PASS' || parsed.qr_id || parsed.matric) {
+        const potentialMatric = parsed.matric || parsed.matricNumber;
         return {
           qrId: parsed.qr_id || parsed.matric || trimmed,
-          matricNumber: (parsed.matric || parsed.matricNumber || parsed.qr_id || '').toUpperCase(),
+          matricNumber: potentialMatric ? potentialMatric.toUpperCase() : undefined,
           name: parsed.name || parsed.studentName
         };
       }
     }
   } catch {
-    // Plain text QR code (e.g. "AR-QR-MTH1019" or "U24MTH1019")
+    // Plain text QR code (e.g. physical plastic card token or "AR-QR-MTH1019" or "U24MTH1019")
   }
 
   return {
     qrId: trimmed,
-    matricNumber: trimmed.toUpperCase()
+    matricNumber: isLikelyMatricNumber(trimmed) ? trimmed.toUpperCase() : undefined
   };
 }
 

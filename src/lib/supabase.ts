@@ -722,7 +722,7 @@ class AegisStore {
           user_id: newUserId,
           matric_number: cleanMatric.toUpperCase(),
           department_id: defaultDeptId,
-          qr_code_id: rawTrimmed.startsWith('AR-QR-') ? rawTrimmed : `AR-QR-${cleanMatric.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`
+          qr_code_id: rawTrimmed
         };
         this.students.push(targetStudent);
       } else {

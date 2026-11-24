@@ -73,8 +73,15 @@ export function matchStudentByMatricOrShorthand(
   if (!query || !students || students.length === 0) return null;
   const clean = query.trim().toUpperCase();
 
-  // 1. Direct exact match (case-insensitive)
-  const exact = students.find((s) => s.matric_number.toUpperCase() === clean);
+  // 1. Direct exact match by physical card QR token, qr_code_id, or matriculation number (case-insensitive)
+  const rawQuery = query.trim();
+  const exact = students.find(
+    (s) =>
+      s.qr_code_id === rawQuery ||
+      (s.qr_code_id && s.qr_code_id.toUpperCase() === clean) ||
+      s.matric_number.toUpperCase() === clean ||
+      s.id === rawQuery
+  );
   if (exact) return exact;
 
   let candidates: Student[] = [];

@@ -13,7 +13,10 @@ import {
   ArrowRight,
   KeyRound,
   RotateCcw,
-  Camera
+  Camera,
+  CreditCard,
+  Check,
+  Trash2
 } from 'lucide-react';
 import { UserRole, UserProfile } from '../types';
 import { getDeviceFingerprint } from '../lib/deviceFingerprint';
@@ -40,6 +43,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
   const [matricNumber, setMatricNumber] = useState('');
   const [departmentId, setDepartmentId] = useState(aegisStore.departments[0]?.id || '');
   const [customDepartment, setCustomDepartment] = useState('');
+  const [cardToken, setCardToken] = useState<string>('');
 
   const [deviceFingerprint, setDeviceFingerprint] = useState<string>('Initializing...');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -49,15 +53,44 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
 
   const handleDirectScan = (result: ScannedIdCardResult) => {
     setShowDirectScanner(false);
-    const matric = result.matricNumber || result.rawCode;
-    if (!matric) return;
+    const raw = (result.rawCode || '').trim();
+    if (!raw) return;
 
     if (authMode === 'login') {
-      setEmail(matric);
-      setPassword(matric);
-      setSuccessMsg(`ID Card Scanned: ${matric}. Enter or verify your password to sign in.`);
+      const cleanRaw = raw.toUpperCase();
+      let matchedStudent = aegisStore.students.find(
+        (s) =>
+          s.qr_code_id === raw ||
+          (s.qr_code_id && s.qr_code_id.toUpperCase() === cleanRaw) ||
+          s.matric_number.toUpperCase() === cleanRaw
+      );
+
+      if (!matchedStudent) {
+        matchedStudent = matchStudentByMatricOrShorthand(raw, aegisStore.students) || undefined;
+      }
+
+      if (matchedStudent) {
+        const user = aegisStore.users.find((u) => u.id === matchedStudent!.user_id);
+        if (user) {
+          setEmail(user.email);
+          setPassword(matchedStudent.matric_number);
+          setSuccessMsg(`Physical ID Card Recognized! Welcome, ${user.full_name} (${matchedStudent.matric_number}). Click Sign In to access your account.`);
+          return;
+        }
+      }
+
+      setEmail(raw);
+      setSuccessMsg(`Card read: "${raw.substring(0, 12)}...". If this card is not yet linked, sign in with your matric number or email first to bind it.`);
     } else {
-      setMatricNumber(matric);
+      // Onboarding / Register: Always bind the exact raw token embedded in the physical card
+      setCardToken(raw);
+
+      if (result.matricNumber) {
+        setMatricNumber(result.matricNumber);
+        if (!email) {
+          setEmail(`${result.matricNumber.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`);
+        }
+      }
       if (result.studentName && !fullName) {
         setFullName(result.studentName);
       }
@@ -67,10 +100,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
         );
         if (matched) setDepartmentId(matched.id);
       }
-      if (!email) {
-        setEmail(`${matric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`);
-      }
-      setSuccessMsg(`ID Card Scanned! Auto-filled matriculation number: ${matric}`);
+      setSuccessMsg(
+        `Physical Student ID Card Linked! Scanned: "${raw.substring(0, 14)}..." (${raw.length} chars). ${
+          result.matricNumber ? 'Matriculation number detected.' : 'Please enter your official Matriculation Number below.'
+        }`
+      );
     }
   };
 
@@ -162,12 +196,16 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
           } else if (/^\d{4}$/.test(cleanMatric)) {
             cleanMatric = `U${year}${deptCode}${cleanMatric}`;
           }
+
+          // Exact physical card token read from ID card or default fallback
+          const assignedQrId = cardToken.trim() || `AR-QR-${cleanMatric.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`;
+
           aegisStore.students.push({
             id: 'std-' + Math.random().toString(36).substring(2, 9),
             user_id: newUser.id,
             matric_number: cleanMatric,
             department_id: assignedDeptId,
-            qr_code_id: `AR-QR-${cleanMatric.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`
+            qr_code_id: assignedQrId
           });
           aegisStore.save();
         }
@@ -199,15 +237,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
 
         let isMatch = aegisStore.verifyUserPassword(user.id, password);
 
-        // For students, also accept their matriculation number or default 'password123' if they haven't set a custom password
+        // For students, also accept their matriculation number, card token, or default 'password123' if they haven't set a custom password
         if (!isMatch && user.role === 'student' && matchedStudent) {
           const rawPass = password.trim().toLowerCase();
           const studentMatricClean = matchedStudent.matric_number.toLowerCase().replace(/[^a-z0-9]/g, '');
           const passClean = rawPass.replace(/[^a-z0-9]/g, '');
+          const cardTokenClean = (matchedStudent.qr_code_id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
           if (
             rawPass === 'password123' ||
             passClean === studentMatricClean ||
-            rawPass === matchedStudent.matric_number.toLowerCase()
+            rawPass === matchedStudent.matric_number.toLowerCase() ||
+            (cardTokenClean && passClean === cardTokenClean)
           ) {
             isMatch = true;
           }
@@ -445,28 +485,68 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
               {role === 'student' && (
                 <>
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-semibold text-slate-700">
-                        Matriculation Number
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setShowDirectScanner(true)}
-                        className="text-[11px] text-teal-dark hover:text-teal-brand font-semibold flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2 py-0.5 rounded border border-teal-brand/30 transition shadow-2xs"
-                        title="Scan student plastic ID card barcode or QR code"
-                      >
-                        <Camera className="w-3 h-3 text-teal-brand" />
-                        <span>Scan ID Card</span>
-                      </button>
-                    </div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Official Matriculation Number
+                    </label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. U24MTH1019 or scan ID card"
+                      placeholder="e.g. U24MTH1019 or 20/55EC012"
                       value={matricNumber}
                       onChange={(e) => setMatricNumber(e.target.value.toUpperCase())}
                       className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono uppercase"
                     />
+                  </div>
+
+                  {/* Physical ID Card Binding */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <CreditCard className="w-4 h-4 text-teal-brand" />
+                        <span className="text-xs font-bold text-oxford-800">
+                          Physical Student ID Card (Optional)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowDirectScanner(true)}
+                        className="text-[11px] text-teal-dark hover:text-teal-brand font-semibold flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2.5 py-1 rounded-lg border border-teal-brand/30 transition shadow-2xs"
+                        title="Scan plastic student ID card barcode or QR code"
+                      >
+                        <Camera className="w-3.5 h-3.5 text-teal-brand" />
+                        <span>{cardToken ? 'Rescan Card' : 'Scan Card QR'}</span>
+                      </button>
+                    </div>
+
+                    {cardToken ? (
+                      <div className="bg-white border border-emerald-300 rounded-lg p-2.5 flex items-center justify-between gap-2 shadow-2xs animate-fade-in">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                            <Check className="w-3 h-3" />
+                          </div>
+                          <div className="overflow-hidden">
+                            <p className="text-[11px] font-bold text-emerald-900 truncate">
+                              Card Linked: <span className="font-mono">{cardToken.substring(0, 16)}...</span>
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              {cardToken.length} characters embedded • Ready for in-class scanning
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setCardToken('')}
+                          className="text-slate-400 hover:text-red-600 p-1 rounded transition"
+                          title="Unlink card"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-slate-500 leading-relaxed">
+                        Have a school plastic ID card with a QR code or barcode? Click <span className="font-semibold text-oxford-800">Scan Card QR</span> to bind it. Whatever code is embedded will be linked directly to you so your Course Rep can mark your attendance in class!
+                      </p>
+                    )}
                   </div>
 
                   <div>

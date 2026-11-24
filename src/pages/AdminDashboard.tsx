@@ -717,28 +717,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
   const handleDirectScannerResult = (result: ScannedIdCardResult) => {
     setShowDirectScannerForOnboard(false);
-    const matric = (result.matricNumber || result.rawCode).trim().toUpperCase();
-    if (!matric) return;
+    const raw = (result.rawCode || '').trim();
+    if (!raw) return;
 
-    // Check if student already exists in the roster
+    // Check if student already exists in the roster by card token or matric
+    const cleanRaw = raw.toUpperCase();
     const existing = aegisStore.students.find(
-      (s) => s.matric_number.toUpperCase() === matric || s.qr_code_id === result.rawCode
+      (s) =>
+        s.qr_code_id === raw ||
+        (s.qr_code_id && s.qr_code_id.toUpperCase() === cleanRaw) ||
+        (result.matricNumber && s.matric_number.toUpperCase() === result.matricNumber.toUpperCase())
     );
 
     if (existing) {
       const user = aegisStore.users.find((u) => u.id === existing.user_id);
-      alert(`Student (${existing.matric_number}) is already registered on the roster as "${user?.full_name || 'Student'}".`);
+      alert(`Card Already Registered: This card is already bound to "${user?.full_name || 'Student'}" (${existing.matric_number}).`);
       return;
     }
 
-    // Auto-populate new student form fields
-    setNewStudentMatric(matric);
-    if (result.studentName) {
-      setNewStudentName(result.studentName);
+    // Always capture the raw card content into the Physical ID Card QR field
+    setNewStudentCustomQr(raw);
+
+    // If the scanned code also contained an actual matriculation number:
+    if (result.matricNumber) {
+      setNewStudentMatric(result.matricNumber);
+      if (result.studentName) {
+        setNewStudentName(result.studentName);
+      } else {
+        setNewStudentName(`Student (${result.matricNumber})`);
+      }
+      setNewStudentEmail(`${result.matricNumber.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`);
     } else {
-      setNewStudentName(`Student (${matric})`);
+      // If arbitrary card token, do not pollute matric field with random characters
+      if (!newStudentMatric) {
+        setNewStudentMatric('');
+      }
     }
-    setNewStudentEmail(`${matric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`);
 
     // Auto-select department if detected
     if (result.deptCode) {
@@ -748,11 +762,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       if (matchedDept) setNewStudentDeptId(matchedDept.id);
     } else if (aegisStore.departments.length > 0) {
       setNewStudentDeptId(aegisStore.departments[0].id);
-    }
-
-    // Bind custom card token if scanned from plastic ID card
-    if (result.rawCode && result.rawCode.length >= 24 && result.rawCode !== matric) {
-      setNewStudentCustomQr(result.rawCode);
     }
 
     setSelectedCoursesForNewStudent(aegisStore.courses.map((c) => c.id));
