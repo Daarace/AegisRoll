@@ -83,22 +83,24 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
       const scanner = new Html5Qrcode(containerId, {
         formatsToSupport: [
           Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.DATA_MATRIX,
           Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.CODE_93,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.DATA_MATRIX
+          Html5QrcodeSupportedFormats.CODE_39
         ],
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        },
         verbose: false
       });
       html5QrCodeRef.current = scanner;
 
       const scanConfig = {
-        fps: 12,
-        qrbox: { width: 260, height: 260 },
-        aspectRatio: 1.0
+        fps: 20,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const edge = Math.min(viewfinderWidth, viewfinderHeight);
+          const size = Math.max(Math.floor(edge * 0.85), 200);
+          return { width: size, height: size };
+        }
       };
 
       try {

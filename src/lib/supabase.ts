@@ -694,12 +694,59 @@ class AegisStore {
     }
 
     if (!targetStudent) {
-      return {
-        success: false,
-        status: 'Error',
-        distance_meters: null,
-        message: `Student with QR Code Pass ID "${qrCodeIdOrMatric}" not found in university roster.`
-      };
+      // Auto-create student record if a matric code or student pass is scanned
+      let cleanMatric = rawTrimmed.toUpperCase().replace(/^AR-QR-/, '');
+      if (/^\d{4}$/.test(cleanMatric)) {
+        const course = this.courses.find((c) => c.id === session.course_id);
+        const courseDept = course ? this.departments.find((d) => d.id === course.department_id) : null;
+        const deptCode = courseDept ? courseDept.code.toUpperCase() : (this.departments[0]?.code || 'GEN');
+        const year = new Date().getFullYear().toString().slice(-2);
+        cleanMatric = `U${year}${deptCode}${cleanMatric}`;
+      }
+
+      if (cleanMatric.length >= 3) {
+        const newUserId = 'usr-std-' + Math.random().toString(36).substring(2, 9);
+        const defaultDeptId = this.departments[0]?.id || 'dept-general';
+        const newUser: UserProfile = {
+          id: newUserId,
+          email: `${cleanMatric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`,
+          full_name: `Student (${cleanMatric})`,
+          role: 'student',
+          password: 'password123',
+          created_at: new Date().toISOString()
+        };
+        this.users.push(newUser);
+
+        targetStudent = {
+          id: 'std-' + Math.random().toString(36).substring(2, 9),
+          user_id: newUserId,
+          matric_number: cleanMatric.toUpperCase(),
+          department_id: defaultDeptId,
+          qr_code_id: rawTrimmed.startsWith('AR-QR-') ? rawTrimmed : `AR-QR-${cleanMatric.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}`
+        };
+        this.students.push(targetStudent);
+      } else {
+        return {
+          success: false,
+          status: 'Error',
+          distance_meters: null,
+          message: `Unrecognized student QR code or matriculation number: "${qrCodeIdOrMatric}".`
+        };
+      }
+    }
+
+    // Ensure student is enrolled in the session's course
+    const isEnrolled = this.enrollments.some(
+      (e) => e.student_id === targetStudent!.id && e.course_id === session.course_id
+    );
+    if (!isEnrolled) {
+      this.enrollments.push({
+        id: 'enr-' + Math.random().toString(36).substring(2, 9),
+        student_id: targetStudent.id,
+        course_id: session.course_id,
+        semester: 'Current',
+        academic_year: new Date().getFullYear().toString()
+      });
     }
 
     const targetUser = this.users.find((u) => u.id === targetStudent!.user_id);

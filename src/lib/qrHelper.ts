@@ -60,7 +60,21 @@ export function buildStudentQrPayload(student: Student, user?: UserProfile): str
 }
 
 /**
+ * Builds a universal mobile check-in URL for a live class session.
+ * Native smartphone cameras scan this QR code and immediately open AegisRoll with the session pre-filled!
+ */
+export function buildSessionBackupQrPayload(session: ClassSession): string {
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    const origin = window.location.origin;
+    const pathname = window.location.pathname || '/';
+    return `${origin}${pathname}?session_id=${encodeURIComponent(session.id)}&pin=${encodeURIComponent(session.session_pin)}#checkin`;
+  }
+  return `AEGISROLL_CHECKIN:${session.id}:${session.session_pin}`;
+}
+
+/**
  * Parses the raw text decoded by the camera scanner into a normalized student identifier.
+ * Supports AegisRoll JSON passes, direct URLs, barcodes, and raw matric numbers.
  */
 export function parseScannedStudentQr(rawText: string): {
   qrId: string;
@@ -68,14 +82,32 @@ export function parseScannedStudentQr(rawText: string): {
   name?: string;
 } {
   const trimmed = rawText.trim();
+
+  // 1. Check if raw text is a URL with student matric params
+  if (trimmed.includes('matric=') || trimmed.includes('student=')) {
+    try {
+      const urlStr = trimmed.startsWith('http') ? trimmed : `https://aegis.edu/${trimmed}`;
+      const url = new URL(urlStr);
+      const matric = url.searchParams.get('matric') || url.searchParams.get('student');
+      const name = url.searchParams.get('name') || undefined;
+      const qrId = url.searchParams.get('qr_id') || matric || trimmed;
+      if (matric) {
+        return { qrId, matricNumber: matric.toUpperCase(), name };
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  // 2. Check structured JSON pass
   try {
     const parsed = JSON.parse(trimmed);
     if (parsed && typeof parsed === 'object') {
-      if (parsed.type === 'AEGISROLL_STUDENT_PASS' || parsed.qr_id) {
+      if (parsed.type === 'AEGISROLL_STUDENT_PASS' || parsed.qr_id || parsed.matric) {
         return {
-          qrId: parsed.qr_id || trimmed,
-          matricNumber: parsed.matric,
-          name: parsed.name
+          qrId: parsed.qr_id || parsed.matric || trimmed,
+          matricNumber: (parsed.matric || parsed.matricNumber || parsed.qr_id || '').toUpperCase(),
+          name: parsed.name || parsed.studentName
         };
       }
     }
@@ -85,56 +117,87 @@ export function parseScannedStudentQr(rawText: string): {
 
   return {
     qrId: trimmed,
-    matricNumber: trimmed
+    matricNumber: trimmed.toUpperCase()
   };
 }
 
 /**
- * Builds a structured JSON payload for a live session backup QR code.
- */
-export function buildSessionBackupQrPayload(session: ClassSession): string {
-  const payload: SessionQrPayload = {
-    type: 'AEGISROLL_SESSION_BACKUP',
-    session_id: session.id,
-    session_pin: session.session_pin,
-    venue: session.venue,
-    created_at: session.start_time
-  };
-  return JSON.stringify(payload);
-}
-
-/**
- * Parses a session backup QR code scanned by a student.
+ * Parses a session QR code scanned either by a phone's normal camera app or the in-app scanner.
+ * Extracts the session_id and 4-digit PIN accurately across all formats.
  */
 export function parseScannedSessionQr(rawText: string): {
   sessionId: string;
   sessionPin: string;
 } | null {
   const trimmed = rawText.trim();
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (parsed && parsed.session_id && parsed.session_pin) {
-      return {
-        sessionId: parsed.session_id,
-        sessionPin: parsed.session_pin
-      };
-    }
-  } catch {
-    // If format is "sessionId:sessionPin"
-    if (trimmed.includes(':')) {
-      const [sessionId, sessionPin] = trimmed.split(':');
+
+  // 1. URL format (e.g. https://.../?session_id=ses-xyz&pin=1234#checkin)
+  if (trimmed.includes('session_id=') || trimmed.includes('session=') || trimmed.includes('pin=')) {
+    try {
+      const urlStr = trimmed.startsWith('http') ? trimmed : `https://aegis.edu/${trimmed}`;
+      const url = new URL(urlStr);
+      let sessionId = url.searchParams.get('session_id') || url.searchParams.get('session');
+      let sessionPin = url.searchParams.get('pin');
+
+      if (!sessionId || !sessionPin) {
+        const hash = url.hash;
+        if (hash.includes('?')) {
+          const hashParams = new URLSearchParams(hash.split('?')[1]);
+          sessionId = sessionId || hashParams.get('session_id') || hashParams.get('session');
+          sessionPin = sessionPin || hashParams.get('pin');
+        }
+      }
+
       if (sessionId && sessionPin) {
         return { sessionId: sessionId.trim(), sessionPin: sessionPin.trim() };
       }
+    } catch {
+      const matchSes = trimmed.match(/session(?:_id)?=([^&?#]+)/);
+      const matchPin = trimmed.match(/pin=([^&?#]+)/);
+      if (matchSes && matchPin) {
+        return { sessionId: matchSes[1].trim(), sessionPin: matchPin[1].trim() };
+      }
     }
   }
+
+  // 2. JSON format
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object') {
+      const sId = parsed.session_id || parsed.sessionId;
+      const pin = parsed.session_pin || parsed.sessionPin || parsed.pin;
+      if (sId && pin) {
+        return { sessionId: String(sId).trim(), sessionPin: String(pin).trim() };
+      }
+    }
+  } catch {
+    // Continue
+  }
+
+  // 3. String Delimiter format: "AEGISROLL_CHECKIN:sessionId:pin" or "sessionId:pin"
+  if (trimmed.includes(':')) {
+    const parts = trimmed.split(':').map((s) => s.trim());
+    if (parts.length === 3 && parts[0] === 'AEGISROLL_CHECKIN') {
+      return { sessionId: parts[1], sessionPin: parts[2] };
+    }
+    if (parts.length === 2 && parts[0].length >= 3 && parts[1].length === 4) {
+      return { sessionId: parts[0], sessionPin: parts[1] };
+    }
+  }
+
   return null;
 }
 
 /**
- * Synthesizes a clean success confirmation chime using browser Web Audio API.
+ * Synthesizes a clean success confirmation chime and haptic feedback.
  */
 export function playSuccessChime() {
+  if (typeof navigator !== 'undefined' && navigator.vibrate) {
+    try {
+      navigator.vibrate([80, 40, 80]);
+    } catch {}
+  }
+
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
@@ -146,7 +209,7 @@ export function playSuccessChime() {
     osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
     osc.frequency.setValueAtTime(880.00, ctx.currentTime + 0.1); // A5
 
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
 
     osc.connect(gain);
@@ -155,6 +218,6 @@ export function playSuccessChime() {
     osc.start();
     osc.stop(ctx.currentTime + 0.35);
   } catch (e) {
-    // AudioContext might be blocked before user interaction; ignore silently
+    // Silently continue if audio context is gated
   }
 }

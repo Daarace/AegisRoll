@@ -86,6 +86,33 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
     }
   };
 
+  // Read session_id and pin from URL parameters (e.g. from scanning screen with phone's normal camera)
+  useEffect(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      let sId = searchParams.get('session_id') || searchParams.get('session');
+      let pin = searchParams.get('pin');
+
+      if (!sId || !pin) {
+        const hash = window.location.hash;
+        if (hash.includes('?')) {
+          const hashParams = new URLSearchParams(hash.split('?')[1]);
+          sId = sId || hashParams.get('session_id') || hashParams.get('session');
+          pin = pin || hashParams.get('pin');
+        }
+      }
+
+      if (sId) {
+        setSelectedSessionId(sId);
+      }
+      if (pin && pin.trim().length === 4) {
+        setPinInput(pin.trim());
+      }
+    } catch (e) {
+      console.warn('Could not parse URL session params:', e);
+    }
+  }, []);
+
   useEffect(() => {
     refreshData();
   }, [currentUser]);
@@ -428,9 +455,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
 
                     {/* 4-Digit PIN Input */}
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5 flex items-center gap-1">
-                        <KeyRound className="w-3.5 h-3.5 text-gold-dark" /> 4-Digit Session PIN
-                      </label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1">
+                          <KeyRound className="w-3.5 h-3.5 text-gold-dark" /> 4-Digit PIN
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowStudentScannerModal(true)}
+                          className="text-[11px] font-bold text-teal-brand hover:underline flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2 py-0.5 rounded-md transition-colors"
+                          title="Point camera at classroom projection screen to scan QR code"
+                        >
+                          <Camera className="w-3.5 h-3.5" /> Scan Screen QR
+                        </button>
+                      </div>
                       <input
                         type="text"
                         maxLength={4}
@@ -581,6 +618,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
           user={currentUser}
           department={aegisStore.departments.find((d) => d.id === student.department_id)}
           onRegenerated={() => refreshData()}
+        />
+      )}
+
+      {/* In-App Camera Scanner for Classroom Projected Screen QR */}
+      {showStudentScannerModal && (
+        <QrCameraScannerModal
+          isOpen={showStudentScannerModal}
+          onClose={() => setShowStudentScannerModal(false)}
+          mode="scan_session"
+          sessionTitle="Scan Classroom Projection Screen"
+          onSessionScanned={(scanned) => {
+            setSelectedSessionId(scanned.sessionId);
+            setPinInput(scanned.sessionPin);
+            setShowStudentScannerModal(false);
+          }}
         />
       )}
     </div>

@@ -20,6 +20,18 @@ export const App: React.FC = () => {
     if (aegisStore.currentUser) {
       setCurrentUser(aegisStore.currentUser);
     }
+
+    // Auto-route if opened from a smartphone normal camera QR scan
+    const search = window.location.search;
+    const hash = window.location.hash;
+    if (search.includes('session_id') || search.includes('pin') || hash.includes('checkin') || hash.includes('session_id')) {
+      const user = aegisStore.currentUser;
+      if (user && user.role === 'student') {
+        setCurrentView('student');
+      } else if (!user) {
+        setCurrentView('auth');
+      }
+    }
   }, []);
 
   const handleNavigate = (view: string) => {
