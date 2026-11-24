@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Camera, RefreshCw, AlertCircle, Keyboard, ScanLine } from 'lucide-react';
+import { X, Camera, RefreshCw, AlertCircle, Keyboard, ScanLine, Zap, ZapOff } from 'lucide-react';
 import { parseScannedStudentQr, playSuccessChime } from '../lib/qrHelper';
+import { decodeVideoFrame } from '../lib/fastScanner';
 import { parseMatricNumber } from '../lib/matricHelper';
 
 export interface ScannedIdCardResult {
@@ -30,13 +30,20 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [manualInput, setManualInput] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [hasTorch, setHasTorch] = useState(false);
 
-  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const animFrameIdRef = useRef<number | null>(null);
   const isScanningRef = useRef(false);
-  const containerId = 'aegis-direct-card-scanner';
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      stopCamera();
+      return;
+    }
 
     setCameraError(null);
     setManualInput('');
@@ -44,7 +51,7 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
 
     const timer = setTimeout(() => {
       startCamera();
-    }, 200);
+    }, 100);
 
     return () => {
       clearTimeout(timer);
@@ -78,97 +85,145 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
 
   const startCamera = async () => {
     try {
-      if (html5QrCodeRef.current && isScanningRef.current) return;
+      stopCamera();
+      setScannerActive(false);
 
-      const scanner = new Html5Qrcode(containerId, {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.DATA_MATRIX,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39
-        ],
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
-        },
-        verbose: false
-      });
-      html5QrCodeRef.current = scanner;
-
-      const scanConfig = {
-        fps: 20,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const edge = Math.min(viewfinderWidth, viewfinderHeight);
-          const size = Math.max(Math.floor(edge * 0.85), 200);
-          return { width: size, height: size };
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 }
         }
-      };
+      });
 
-      try {
-        // Try rear/environment camera (smartphones/tablets)
-        await scanner.start(
-          { facingMode: 'environment' },
-          scanConfig,
-          (decodedText) => processDecodedText(decodedText),
-          () => {}
-        );
-      } catch (backCamErr) {
-        // Fallback to front camera or default webcam (laptops/desktops)
-        await scanner.start(
-          { facingMode: 'user' },
-          scanConfig,
-          (decodedText) => processDecodedText(decodedText),
-          () => {}
-        );
+      mediaStreamRef.current = stream;
+
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+        setHasTorch(Boolean(caps.torch));
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        await videoRef.current.play();
       }
 
       isScanningRef.current = true;
       setScannerActive(true);
+
+      runScanLoop();
     } catch (err: any) {
       console.warn('Direct scanner camera initiation failed:', err);
-      setCameraError(
-        err.message ||
-          'Camera access was denied or not supported. You can enter or paste the ID code manually below.'
-      );
-      setScannerActive(false);
-      setShowManualInput(true);
+      // Fallback: try basic video
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: true
+        });
+        mediaStreamRef.current = fallbackStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = fallbackStream;
+          videoRef.current.setAttribute('playsinline', 'true');
+          await videoRef.current.play();
+        }
+        isScanningRef.current = true;
+        setScannerActive(true);
+        runScanLoop();
+      } catch (fallbackErr: any) {
+        setCameraError(
+          fallbackErr.message ||
+            'Camera access was denied or not supported. You can enter or paste the ID code manually below.'
+        );
+        setScannerActive(false);
+        setShowManualInput(true);
+      }
     }
   };
 
-  const stopCamera = async () => {
-    if (html5QrCodeRef.current && isScanningRef.current) {
-      try {
-        await html5QrCodeRef.current.stop();
-        html5QrCodeRef.current.clear();
-      } catch (err) {
-        console.warn('Error stopping direct scanner:', err);
-      } finally {
-        isScanningRef.current = false;
-        setScannerActive(false);
-        html5QrCodeRef.current = null;
+  const runScanLoop = () => {
+    if (!isScanningRef.current) return;
+
+    const scanFrame = async () => {
+      if (!isScanningRef.current) return;
+
+      if (videoRef.current && canvasRef.current && videoRef.current.readyState >= 2) {
+        try {
+          const result = await decodeVideoFrame(videoRef.current, canvasRef.current);
+          if (result && result.text) {
+            processDecodedText(result.text);
+            return;
+          }
+        } catch {
+          // Continue
+        }
+      }
+
+      if (isScanningRef.current) {
+        animFrameIdRef.current = requestAnimationFrame(scanFrame);
+      }
+    };
+
+    animFrameIdRef.current = requestAnimationFrame(scanFrame);
+  };
+
+  const stopCamera = () => {
+    isScanningRef.current = false;
+    if (animFrameIdRef.current) {
+      cancelAnimationFrame(animFrameIdRef.current);
+      animFrameIdRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setScannerActive(false);
+    setIsTorchOn(false);
+  };
+
+  const toggleTorch = async () => {
+    if (!mediaStreamRef.current) return;
+    const track = mediaStreamRef.current.getVideoTracks()[0];
+    if (track) {
+      const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+      if (caps.torch) {
+        try {
+          const next = !isTorchOn;
+          await track.applyConstraints({ advanced: [{ torch: next }] as any });
+          setIsTorchOn(next);
+        } catch (e) {
+          console.warn('Torch toggle failed:', e);
+        }
       }
     }
   };
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualInput.trim()) return;
-    processDecodedText(manualInput);
+    if (manualInput.trim()) {
+      processDecodedText(manualInput.trim());
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-oxford-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-surface-card rounded-2xl max-w-md w-full p-6 shadow-academic-lg border border-surface-border">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-oxford-900/80 backdrop-blur-sm animate-fade-in">
+      <div className="bg-surface-card w-full max-w-md rounded-2xl shadow-academic border border-surface-border overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-surface-border">
+        <div className="bg-oxford-800 text-white px-5 py-4 flex items-center justify-between border-b border-oxford-700">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-teal-brand/20 border border-teal-brand/40 flex items-center justify-center text-teal-brand">
-              <ScanLine className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-teal-brand/20 border border-teal-brand/40 flex items-center justify-center text-teal-brand">
+              <ScanLine className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-serif text-base font-bold text-oxford-800">{title}</h3>
-              <p className="text-xs text-slate-500">{subtitle}</p>
+              <h2 className="font-serif font-bold text-sm text-white">{title}</h2>
+              <p className="text-[11px] text-slate-300">Fast Hardware Scanning</p>
             </div>
           </div>
           <button
@@ -176,88 +231,107 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
               stopCamera();
               onClose();
             }}
-            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-oxford-700 transition"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Camera Viewfinder */}
-        <div className="my-4">
-          <div className="relative rounded-2xl overflow-hidden bg-black aspect-square max-h-72 mx-auto flex items-center justify-center border-2 border-teal-brand/40 shadow-inner">
-            <div id={containerId} className="w-full h-full" />
+        {/* Viewport & Controls */}
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-slate-600">{subtitle}</p>
+
+          <div className="relative rounded-2xl overflow-hidden bg-black aspect-video sm:aspect-square max-h-64 mx-auto flex items-center justify-center border-2 border-teal-brand/40 shadow-inner">
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              autoPlay
+              className="w-full h-full object-cover"
+            />
+            <canvas ref={canvasRef} className="hidden" />
+
+            {/* Target Reticle */}
+            {scannerActive && !cameraError && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="w-48 h-48 border-2 border-teal-brand rounded-2xl relative shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+                  <span className="absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 border-teal-brand rounded-tl" />
+                  <span className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-teal-brand rounded-tr" />
+                  <span className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-teal-brand rounded-bl" />
+                  <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-teal-brand rounded-br" />
+                  <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-teal-brand to-transparent shadow-[0_0_8px_#26B9A8] animate-pulse absolute top-1/2 -translate-y-1/2" />
+                </div>
+              </div>
+            )}
 
             {!scannerActive && !cameraError && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-oxford-900 text-white gap-2 p-4 text-center">
-                <RefreshCw className="w-7 h-7 text-teal-brand animate-spin" />
-                <p className="text-xs text-slate-300">Initializing live camera scanner...</p>
+                <RefreshCw className="w-6 h-6 text-teal-brand animate-spin" />
+                <p className="text-xs text-slate-300">Activating camera...</p>
               </div>
             )}
 
             {cameraError && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-oxford-900 text-white gap-2 p-6 text-center">
-                <AlertCircle className="w-8 h-8 text-amber-400" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-oxford-900 text-white gap-2 p-5 text-center">
+                <AlertCircle className="w-7 h-7 text-amber-400" />
                 <p className="text-xs text-amber-200">{cameraError}</p>
                 <button
-                  type="button"
                   onClick={startCamera}
-                  className="mt-2 text-xs bg-teal-brand text-oxford-900 font-semibold px-3 py-1.5 rounded-lg hover:bg-teal-400 transition"
+                  className="mt-1 text-xs bg-teal-brand text-oxford-900 font-semibold px-3 py-1 rounded-lg hover:bg-teal-400 transition"
                 >
                   Retry Camera
                 </button>
               </div>
             )}
           </div>
-        </div>
 
-        {/* Guidance tip */}
-        <p className="text-center text-[11px] text-slate-500">
-          Point lens at a 1D barcode on a plastic ID card or digital 2D QR pass.
-        </p>
+          {/* Torch toggle if supported */}
+          {hasTorch && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={toggleTorch}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
+                  isTorchOn
+                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                {isTorchOn ? <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" /> : <ZapOff className="w-3.5 h-3.5" />}
+                <span>{isTorchOn ? 'Torch On (Better for Plastic Cards)' : 'Turn On Torch'}</span>
+              </button>
+            </div>
+          )}
 
-        {/* Manual Input Toggle */}
-        <div className="mt-3 text-center">
-          <button
-            type="button"
-            onClick={() => setShowManualInput(!showManualInput)}
-            className="text-xs text-teal-dark hover:underline inline-flex items-center gap-1 font-medium"
-          >
-            <Keyboard className="w-3.5 h-3.5" />
-            <span>{showManualInput ? 'Hide manual entry' : 'Type or paste code manually'}</span>
-          </button>
-        </div>
-
-        {showManualInput && (
-          <form onSubmit={handleManualSubmit} className="mt-2 flex gap-2">
-            <input
-              type="text"
-              placeholder="e.g. U24MTH1019 or card token..."
-              value={manualInput}
-              onChange={(e) => setManualInput(e.target.value)}
-              className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 focus:ring-1 focus:ring-teal-brand outline-none font-mono"
-            />
+          {/* Manual Input */}
+          <div className="border-t border-slate-200 pt-3">
             <button
-              type="submit"
-              disabled={!manualInput.trim()}
-              className="px-3.5 py-2 bg-oxford-800 hover:bg-oxford-700 text-white font-bold text-xs rounded-lg disabled:opacity-40"
+              onClick={() => setShowManualInput(!showManualInput)}
+              className="text-xs text-slate-600 hover:text-oxford-800 font-medium flex items-center gap-1.5"
             >
-              Apply
+              <Keyboard className="w-3.5 h-3.5 text-teal-brand" />
+              {showManualInput ? 'Hide manual entry' : 'Type or paste ID card code / matric number'}
             </button>
-          </form>
-        )}
 
-        {/* Cancel Button */}
-        <div className="mt-5 pt-3 border-t border-surface-border flex justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              stopCamera();
-              onClose();
-            }}
-            className="px-4 py-2 text-xs text-slate-600 rounded-lg hover:bg-slate-100 font-medium"
-          >
-            Cancel
-          </button>
+            {showManualInput && (
+              <form onSubmit={handleManualSubmit} className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. U24MTH1019 or card token"
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  className="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 uppercase font-mono outline-none focus:ring-1 focus:ring-teal-brand"
+                />
+                <button
+                  type="submit"
+                  disabled={!manualInput.trim()}
+                  className="bg-oxford-800 text-white text-xs px-3.5 py-2 rounded-lg font-medium hover:bg-oxford-700 disabled:opacity-50"
+                >
+                  Verify
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
     </div>

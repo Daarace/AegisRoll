@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import {
   X,
   CreditCard,
@@ -10,11 +9,14 @@ import {
   Sparkles,
   Keyboard,
   ShieldCheck,
-  Check
+  Check,
+  Zap,
+  ZapOff
 } from 'lucide-react';
 import { Student, UserProfile, Department } from '../types';
 import { aegisStore } from '../lib/supabase';
 import { playSuccessChime } from '../lib/qrHelper';
+import { decodeVideoFrame } from '../lib/fastScanner';
 
 interface BindIdCardModalProps {
   isOpen: boolean;
@@ -39,10 +41,14 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isBinding, setIsBinding] = useState(false);
   const [bindResult, setBindResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [hasTorch, setHasTorch] = useState(false);
+  const [isTorchOn, setIsTorchOn] = useState(false);
 
-  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const isScanningRef = useRef(false);
-  const containerId = 'aegis-id-card-scanner-container';
+  const animFrameIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -54,7 +60,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
 
     const timer = setTimeout(() => {
       startCamera();
-    }, 250);
+    }, 150);
 
     return () => {
       clearTimeout(timer);
@@ -62,76 +68,127 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
     };
   }, [isOpen, student?.id]);
 
+  const onScanSuccess = (decodedText: string) => {
+    const trimmed = decodedText.trim();
+    if (!trimmed) return;
+    setScannedToken(trimmed);
+    setManualInput(trimmed);
+    playSuccessChime();
+  };
+
   const startCamera = async () => {
     try {
-      if (html5QrCodeRef.current && isScanningRef.current) return;
+      stopCamera();
+      setScannerActive(false);
 
-      const qrScanner = new Html5Qrcode(containerId, {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.DATA_MATRIX
-        ],
-        verbose: false
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 }
+        }
       });
-      html5QrCodeRef.current = qrScanner;
 
-      const scanConfig = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0
-      };
+      mediaStreamRef.current = stream;
 
-      const onScanSuccess = (decodedText: string) => {
-        const trimmed = decodedText.trim();
-        setScannedToken(trimmed);
-        setManualInput(trimmed);
-        playSuccessChime();
-      };
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+        setHasTorch(Boolean(caps.torch));
+      }
 
-      try {
-        await qrScanner.start(
-          { facingMode: 'environment' },
-          scanConfig,
-          onScanSuccess,
-          () => {}
-        );
-      } catch (backCamErr) {
-        await qrScanner.start(
-          { facingMode: 'user' },
-          scanConfig,
-          onScanSuccess,
-          () => {}
-        );
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        await videoRef.current.play();
       }
 
       isScanningRef.current = true;
       setScannerActive(true);
+      runScanLoop();
     } catch (err: any) {
       console.warn('Card scanner camera initiation failed:', err);
-      setCameraError(
-        err.message ||
-          'Camera access was denied or not supported. You can enter or paste the 32-character QR code manually below.'
-      );
-      setScannerActive(false);
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: true
+        });
+        mediaStreamRef.current = fallbackStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = fallbackStream;
+          videoRef.current.setAttribute('playsinline', 'true');
+          await videoRef.current.play();
+        }
+        isScanningRef.current = true;
+        setScannerActive(true);
+        runScanLoop();
+      } catch (fallbackErr: any) {
+        setCameraError(
+          fallbackErr.message ||
+            'Camera access was denied or not supported. You can enter or paste the 32-character QR code manually below.'
+        );
+        setScannerActive(false);
+      }
     }
   };
 
-  const stopCamera = async () => {
-    if (html5QrCodeRef.current && isScanningRef.current) {
-      try {
-        await html5QrCodeRef.current.stop();
-        html5QrCodeRef.current.clear();
-      } catch (err) {
-        console.warn('Error stopping card camera:', err);
-      } finally {
-        isScanningRef.current = false;
-        setScannerActive(false);
-        html5QrCodeRef.current = null;
+  const runScanLoop = () => {
+    if (!isScanningRef.current) return;
+
+    const scanFrame = async () => {
+      if (!isScanningRef.current) return;
+
+      if (videoRef.current && canvasRef.current && videoRef.current.readyState >= 2) {
+        try {
+          const result = await decodeVideoFrame(videoRef.current, canvasRef.current);
+          if (result && result.text) {
+            onScanSuccess(result.text);
+            return;
+          }
+        } catch {
+          // Continue loop
+        }
+      }
+
+      if (isScanningRef.current) {
+        animFrameIdRef.current = requestAnimationFrame(scanFrame);
+      }
+    };
+
+    animFrameIdRef.current = requestAnimationFrame(scanFrame);
+  };
+
+  const stopCamera = () => {
+    isScanningRef.current = false;
+    if (animFrameIdRef.current) {
+      cancelAnimationFrame(animFrameIdRef.current);
+      animFrameIdRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setScannerActive(false);
+    setIsTorchOn(false);
+  };
+
+  const toggleTorch = async () => {
+    if (!mediaStreamRef.current) return;
+    const track = mediaStreamRef.current.getVideoTracks()[0];
+    if (track) {
+      const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+      if (caps.torch) {
+        try {
+          const next = !isTorchOn;
+          await track.applyConstraints({ advanced: [{ torch: next }] as any });
+          setIsTorchOn(next);
+        } catch (e) {
+          console.warn('Torch toggle failed:', e);
+        }
       }
     }
   };
@@ -243,7 +300,45 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
             </div>
 
             <div className="relative rounded-2xl overflow-hidden bg-black aspect-video max-h-56 mx-auto flex items-center justify-center border-2 border-teal-brand/40 shadow-inner">
-              <div id={containerId} className="w-full h-full" />
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+              <canvas ref={canvasRef} className="hidden" />
+
+              {/* Torch Button */}
+              {hasTorch && scannerActive && (
+                <button
+                  type="button"
+                  onClick={toggleTorch}
+                  className={`absolute top-2 right-2 z-20 p-2 rounded-xl backdrop-blur-md transition ${
+                    isTorchOn
+                      ? 'bg-amber-400 text-oxford-950 shadow-md ring-2 ring-amber-300'
+                      : 'bg-black/60 text-white/80 hover:text-white'
+                  }`}
+                  title={isTorchOn ? 'Turn Flashlight Off' : 'Turn Flashlight On (Anti-Glare)'}
+                >
+                  {isTorchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+                </button>
+              )}
+
+              {/* Targeting Reticle & Scan Laser */}
+              {scannerActive && !scannedToken && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="relative w-44 h-44 rounded-xl border-2 border-dashed border-teal-brand/70 shadow-lg">
+                    {/* Corner Reticle Accents */}
+                    <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-2 border-l-2 border-teal-brand" />
+                    <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-2 border-r-2 border-teal-brand" />
+                    <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-2 border-l-2 border-teal-brand" />
+                    <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-2 border-r-2 border-teal-brand" />
+
+                    {/* Animated Scanning Laser Line */}
+                    <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-teal-300 to-transparent shadow-[0_0_8px_#14b8a6] animate-pulse top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+              )}
 
               {!scannerActive && !cameraError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-oxford-900 text-white gap-2 p-4 text-center">
