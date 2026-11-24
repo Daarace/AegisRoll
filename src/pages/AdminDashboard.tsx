@@ -64,6 +64,7 @@ import { StudentQrPassModal } from '../components/StudentQrPassModal';
 import { BindIdCardModal } from '../components/BindIdCardModal';
 import { RepSecurityModal } from '../components/RepSecurityModal';
 import { CsvStudentImportModal } from '../components/CsvStudentImportModal';
+import { DirectCardScannerModal, ScannedIdCardResult } from '../components/DirectCardScannerModal';
 import { matchStudentByMatricOrShorthand } from '../lib/matricHelper';
 
 interface AdminDashboardProps {
@@ -158,6 +159,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
   // Student CRUD Modals & States
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [showDirectScannerForOnboard, setShowDirectScannerForOnboard] = useState(false);
   const [showCsvImportModal, setShowCsvImportModal] = useState(false);
   const [csvTargetCourseId, setCsvTargetCourseId] = useState<string | undefined>(undefined);
   const [newStudentName, setNewStudentName] = useState('');
@@ -621,6 +623,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   };
 
   // --- STUDENT CRUD ACTIONS ---
+
+  const handleDirectScannerResult = (result: ScannedIdCardResult) => {
+    setShowDirectScannerForOnboard(false);
+    const matric = (result.matricNumber || result.rawCode).trim().toUpperCase();
+    if (!matric) return;
+
+    // Check if student already exists in the roster
+    const existing = aegisStore.students.find(
+      (s) => s.matric_number.toUpperCase() === matric || s.qr_code_id === result.rawCode
+    );
+
+    if (existing) {
+      const user = aegisStore.users.find((u) => u.id === existing.user_id);
+      alert(`Student (${existing.matric_number}) is already registered on the roster as "${user?.full_name || 'Student'}".`);
+      return;
+    }
+
+    // Auto-populate new student form fields
+    setNewStudentMatric(matric);
+    if (result.studentName) {
+      setNewStudentName(result.studentName);
+    } else {
+      setNewStudentName(`Student (${matric})`);
+    }
+    setNewStudentEmail(`${matric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`);
+
+    // Auto-select department if detected
+    if (result.deptCode) {
+      const matchedDept = aegisStore.departments.find(
+        (d) => d.code.toUpperCase() === result.deptCode?.toUpperCase()
+      );
+      if (matchedDept) setNewStudentDeptId(matchedDept.id);
+    } else if (aegisStore.departments.length > 0) {
+      setNewStudentDeptId(aegisStore.departments[0].id);
+    }
+
+    // Bind custom card token if scanned from plastic ID card
+    if (result.rawCode && result.rawCode.length >= 24 && result.rawCode !== matric) {
+      setNewStudentCustomQr(result.rawCode);
+    }
+
+    setSelectedCoursesForNewStudent(aegisStore.courses.map((c) => c.id));
+    setShowAddStudentModal(true);
+  };
 
   const handleCreateStudent = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1650,6 +1696,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
             <div className="flex flex-wrap items-center gap-2">
               <button
+                onClick={() => setShowDirectScannerForOnboard(true)}
+                className="px-3.5 py-2 rounded-xl bg-teal-brand/10 hover:bg-teal-brand/20 border border-teal-brand/30 text-teal-dark font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+                title="Scan a student's physical ID card barcode or digital QR pass to onboard them immediately"
+              >
+                <Camera className="w-4 h-4 text-teal-brand" />
+                <span>Scan to Onboard</span>
+              </button>
+
+              <button
                 onClick={() => {
                   setCsvTargetCourseId(undefined);
                   setShowCsvImportModal(true);
@@ -2660,10 +2715,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                    <span>Matriculation No</span>
-                    <span className="text-[10px] text-teal-dark font-mono font-normal">e.g. U24MTH1019, U23CSC2005</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700">Matriculation No</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDirectScannerForOnboard(true)}
+                      className="text-[11px] text-teal-dark hover:text-teal-brand font-semibold flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2 py-0.5 rounded border border-teal-brand/30 transition shadow-2xs"
+                      title="Scan student plastic ID card barcode or QR code"
+                    >
+                      <Camera className="w-3 h-3 text-teal-brand" />
+                      <span>Scan Card</span>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     required
@@ -2700,12 +2763,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
                     <CreditCard className="w-3.5 h-3.5 text-teal-brand" /> Physical ID Card QR Code (Optional)
-                  </span>
-                  <span className="text-[10px] text-slate-400">32-character card token</span>
-                </label>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDirectScannerForOnboard(true)}
+                    className="text-[11px] text-teal-dark hover:text-teal-brand font-semibold flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2 py-0.5 rounded border border-teal-brand/30 transition shadow-2xs"
+                    title="Scan 32-character plastic card QR code or barcode"
+                  >
+                    <Camera className="w-3 h-3 text-teal-brand" />
+                    <span>Scan Card Token</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   placeholder="Paste or type 32-character ID card QR code (leave empty to auto-generate)"
@@ -2991,6 +3062,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         onClose={() => setShowCsvImportModal(false)}
         onImportCompleted={() => triggerUpdate()}
         preselectedCourseId={csvTargetCourseId}
+      />
+
+      <DirectCardScannerModal
+        isOpen={showDirectScannerForOnboard}
+        onClose={() => setShowDirectScannerForOnboard(false)}
+        onScan={handleDirectScannerResult}
+        title="Scan Student ID Card to Onboard"
+        subtitle="Point camera at student's plastic ID card barcode or digital pass"
       />
     </div>
   );

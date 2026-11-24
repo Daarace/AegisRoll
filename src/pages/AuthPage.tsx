@@ -12,12 +12,14 @@ import {
   CheckCircle2,
   ArrowRight,
   KeyRound,
-  RotateCcw
+  RotateCcw,
+  Camera
 } from 'lucide-react';
 import { UserRole, UserProfile } from '../types';
 import { getDeviceFingerprint } from '../lib/deviceFingerprint';
 import { aegisStore } from '../lib/supabase';
 import { matchStudentByMatricOrShorthand } from '../lib/matricHelper';
+import { DirectCardScannerModal, ScannedIdCardResult } from '../components/DirectCardScannerModal';
 
 interface AuthPageProps {
   onSuccess: (user: UserProfile) => void;
@@ -43,6 +45,34 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showDirectScanner, setShowDirectScanner] = useState(false);
+
+  const handleDirectScan = (result: ScannedIdCardResult) => {
+    setShowDirectScanner(false);
+    const matric = result.matricNumber || result.rawCode;
+    if (!matric) return;
+
+    if (authMode === 'login') {
+      setEmail(matric);
+      setPassword(matric);
+      setSuccessMsg(`ID Card Scanned: ${matric}. Enter or verify your password to sign in.`);
+    } else {
+      setMatricNumber(matric);
+      if (result.studentName && !fullName) {
+        setFullName(result.studentName);
+      }
+      if (result.deptCode) {
+        const matched = aegisStore.departments.find(
+          (d) => d.code.toUpperCase() === result.deptCode?.toUpperCase()
+        );
+        if (matched) setDepartmentId(matched.id);
+      }
+      if (!email) {
+        setEmail(`${matric.toLowerCase().replace(/[^a-z0-9]/g, '')}@student.edu`);
+      }
+      setSuccessMsg(`ID Card Scanned! Auto-filled matriculation number: ${matric}`);
+    }
+  };
 
   useEffect(() => {
     getDeviceFingerprint().then((fp) => {
@@ -284,12 +314,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
-              <span>{authMode === 'register' ? 'Institutional Email Address' : 'Matriculation Number or Email'}</span>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-slate-700">
+                {authMode === 'register' ? 'Institutional Email Address' : 'Matriculation Number or Email'}
+              </label>
               {authMode === 'login' && (
-                <span className="text-[10px] text-teal-dark font-medium">Students: Use your Matric No.</span>
+                <button
+                  type="button"
+                  onClick={() => setShowDirectScanner(true)}
+                  className="text-[11px] text-teal-dark hover:text-teal-brand font-semibold flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2 py-0.5 rounded border border-teal-brand/30 transition shadow-2xs"
+                  title="Scan physical student ID card or digital QR pass"
+                >
+                  <Camera className="w-3 h-3 text-teal-brand" />
+                  <span>Scan ID / QR Pass</span>
+                </button>
               )}
-            </label>
+            </div>
             <div className="relative">
               {authMode === 'register' ? (
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -405,14 +445,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
               {role === 'student' && (
                 <>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
-                      <span>Matriculation Number</span>
-                      <span className="text-[10px] text-teal-dark font-mono font-normal">e.g. U24MTH1019 (1=UTME, 2=DE)</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-slate-700">
+                        Matriculation Number
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowDirectScanner(true)}
+                        className="text-[11px] text-teal-dark hover:text-teal-brand font-semibold flex items-center gap-1 bg-teal-brand/10 hover:bg-teal-brand/20 px-2 py-0.5 rounded border border-teal-brand/30 transition shadow-2xs"
+                        title="Scan student plastic ID card barcode or QR code"
+                      >
+                        <Camera className="w-3 h-3 text-teal-brand" />
+                        <span>Scan ID Card</span>
+                      </button>
+                    </div>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. U24MTH1019 or U23CSC2005"
+                      placeholder="e.g. U24MTH1019 or scan ID card"
                       value={matricNumber}
                       onChange={(e) => setMatricNumber(e.target.value.toUpperCase())}
                       className="w-full px-3 py-2 text-xs border border-surface-border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-brand font-mono uppercase"
@@ -520,6 +570,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onNavigate }) => 
           )}
         </div>
       </div>
+
+      <DirectCardScannerModal
+        isOpen={showDirectScanner}
+        onClose={() => setShowDirectScanner(false)}
+        onScan={handleDirectScan}
+        title={authMode === 'login' ? 'Scan Student ID to Sign In' : 'Scan Student ID Card to Auto-Fill'}
+        subtitle="Point camera at student ID card barcode or digital QR pass"
+      />
     </div>
   );
 };
