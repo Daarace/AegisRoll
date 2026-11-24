@@ -189,8 +189,8 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
         ? { deviceId: { exact: selectedCameraId } }
         : {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 }
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
           };
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -200,17 +200,38 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
 
       mediaStreamRef.current = stream;
 
-      // Check torch capability
+      // Check capabilities & apply continuous autofocus
       const track = stream.getVideoTracks()[0];
       if (track) {
-        const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-        setHasTorch(Boolean(caps.torch));
+        try {
+          const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+          setHasTorch(Boolean(caps.torch));
+
+          const adv: any = {};
+          if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+            adv.focusMode = 'continuous';
+          }
+          if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
+            adv.whiteBalanceMode = 'continuous';
+          }
+          if (Object.keys(adv).length > 0 && track.applyConstraints) {
+            await track.applyConstraints({ advanced: [adv] as any });
+          }
+        } catch (e) {
+          console.warn('Track constraint error:', e);
+        }
       }
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
         videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('video.play() error:', playErr);
+        }
       }
 
       isScanningRef.current = true;
@@ -220,16 +241,18 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
       runScanLoop();
     } catch (err: any) {
       console.warn('Fast camera scanner failed to start:', err);
-      // Fallback: try basic video constraints without resolution requirements
+      // Fallback: try basic environment video constraints without strict resolution
       try {
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: true
+          video: { facingMode: 'environment' }
         });
         mediaStreamRef.current = fallbackStream;
         if (videoRef.current) {
           videoRef.current.srcObject = fallbackStream;
+          videoRef.current.muted = true;
           videoRef.current.setAttribute('playsinline', 'true');
+          videoRef.current.setAttribute('webkit-playsinline', 'true');
           await videoRef.current.play();
         }
         isScanningRef.current = true;
@@ -246,20 +269,25 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
     }
   };
 
+  const isFrameBusyRef = useRef(false);
+
   const runScanLoop = () => {
     if (!isScanningRef.current) return;
 
     const scanFrame = async () => {
       if (!isScanningRef.current) return;
 
-      if (videoRef.current && canvasRef.current && videoRef.current.readyState >= 2) {
+      if (!isFrameBusyRef.current && videoRef.current && videoRef.current.readyState >= 2) {
+        isFrameBusyRef.current = true;
         try {
-          const result = await decodeVideoFrame(videoRef.current, canvasRef.current);
+          const result = await decodeVideoFrame(videoRef.current);
           if (result && result.text) {
             handleProcessCode(result.text);
           }
         } catch {
           // Frame decode exception; continue
+        } finally {
+          isFrameBusyRef.current = false;
         }
       }
 

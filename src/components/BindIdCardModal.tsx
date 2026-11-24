@@ -6,17 +6,17 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  Sparkles,
   Keyboard,
   ShieldCheck,
   Check,
   Zap,
-  ZapOff
+  ZapOff,
+  ZoomIn
 } from 'lucide-react';
 import { Student, UserProfile, Department } from '../types';
 import { aegisStore } from '../lib/supabase';
 import { playSuccessChime } from '../lib/qrHelper';
-import { decodeVideoFrame } from '../lib/fastScanner';
+import { decodeVideoFrame, decodeImageFile } from '../lib/fastScanner';
 
 interface BindIdCardModalProps {
   isOpen: boolean;
@@ -43,12 +43,17 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
   const [bindResult, setBindResult] = useState<{ success: boolean; message: string } | null>(null);
   const [hasTorch, setHasTorch] = useState(false);
   const [isTorchOn, setIsTorchOn] = useState(false);
+  const [hasZoom, setHasZoom] = useState(false);
+  const [currentZoom, setCurrentZoom] = useState(1);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const [scanStatus, setScanStatus] = useState<string>('Hold card steady in box');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const isScanningRef = useRef(false);
+  const isFrameBusyRef = useRef(false);
   const animFrameIdRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -57,10 +62,11 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
     setManualInput('');
     setBindResult(null);
     setCameraError(null);
+    setScanStatus('Initializing camera...');
 
     const timer = setTimeout(() => {
       startCamera();
-    }, 150);
+    }, 120);
 
     return () => {
       clearTimeout(timer);
@@ -80,53 +86,80 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
     try {
       stopCamera();
       setScannerActive(false);
+      setCameraError(null);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const constraints: MediaStreamConstraints = {
         audio: false,
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 }
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
         }
-      });
+      };
 
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       mediaStreamRef.current = stream;
 
       const track = stream.getVideoTracks()[0];
       if (track) {
-        const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-        setHasTorch(Boolean(caps.torch));
+        try {
+          const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+          setHasTorch(Boolean(caps.torch));
+          setHasZoom(Boolean(caps.zoom));
+
+          const adv: any = {};
+          if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+            adv.focusMode = 'continuous';
+          }
+          if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
+            adv.whiteBalanceMode = 'continuous';
+          }
+          if (Object.keys(adv).length > 0 && track.applyConstraints) {
+            await track.applyConstraints({ advanced: [adv] as any });
+          }
+        } catch (e) {
+          console.warn('Track constraint error:', e);
+        }
       }
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
         videoRef.current.setAttribute('playsinline', 'true');
-        await videoRef.current.play();
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('video.play() error:', playErr);
+        }
       }
 
       isScanningRef.current = true;
       setScannerActive(true);
+      setScanStatus('Scanning live video...');
       runScanLoop();
     } catch (err: any) {
       console.warn('Card scanner camera initiation failed:', err);
       try {
         const fallbackStream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: true
+          video: { facingMode: 'environment' }
         });
         mediaStreamRef.current = fallbackStream;
         if (videoRef.current) {
           videoRef.current.srcObject = fallbackStream;
+          videoRef.current.muted = true;
           videoRef.current.setAttribute('playsinline', 'true');
           await videoRef.current.play();
         }
         isScanningRef.current = true;
         setScannerActive(true);
+        setScanStatus('Scanning live video (standard)...');
         runScanLoop();
       } catch (fallbackErr: any) {
         setCameraError(
           fallbackErr.message ||
-            'Camera access was denied or not supported. You can enter or paste the 32-character QR code manually below.'
+            'Camera access was denied or not supported. You can snap a photo or enter the token manually below.'
         );
         setScannerActive(false);
       }
@@ -139,15 +172,18 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
     const scanFrame = async () => {
       if (!isScanningRef.current) return;
 
-      if (videoRef.current && canvasRef.current && videoRef.current.readyState >= 2) {
+      if (!isFrameBusyRef.current && videoRef.current && videoRef.current.readyState >= 2) {
+        isFrameBusyRef.current = true;
         try {
-          const result = await decodeVideoFrame(videoRef.current, canvasRef.current);
+          const result = await decodeVideoFrame(videoRef.current);
           if (result && result.text) {
             onScanSuccess(result.text);
             return;
           }
         } catch {
           // Continue loop
+        } finally {
+          isFrameBusyRef.current = false;
         }
       }
 
@@ -161,6 +197,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
 
   const stopCamera = () => {
     isScanningRef.current = false;
+    isFrameBusyRef.current = false;
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
       animFrameIdRef.current = null;
@@ -174,6 +211,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
     }
     setScannerActive(false);
     setIsTorchOn(false);
+    setCurrentZoom(1);
   };
 
   const toggleTorch = async () => {
@@ -190,6 +228,49 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
           console.warn('Torch toggle failed:', e);
         }
       }
+    }
+  };
+
+  const toggleZoom = async () => {
+    if (!mediaStreamRef.current) return;
+    const track = mediaStreamRef.current.getVideoTracks()[0];
+    if (track) {
+      const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+      if (caps.zoom) {
+        const nextZoom = currentZoom === 1 ? Math.min(2, caps.zoom.max || 2) : 1;
+        try {
+          await track.applyConstraints({ advanced: [{ zoom: nextZoom }] as any });
+          setCurrentZoom(nextZoom);
+        } catch (e) {
+          console.warn('Zoom failed:', e);
+        }
+      }
+    }
+  };
+
+  // Direct phone photo capture fallback
+  const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingFile(true);
+    setScanStatus('Decoding photo...');
+
+    try {
+      const decodedText = await decodeImageFile(file);
+      if (decodedText) {
+        onScanSuccess(decodedText);
+      } else {
+        alert(
+          'Could not read a QR code or barcode from this photo. Please hold the card flat in good lighting and try again.'
+        );
+        setScanStatus('Scanning live video...');
+      }
+    } catch (err: any) {
+      alert(`Photo decode error: ${err.message || 'Failed to process image'}`);
+    } finally {
+      setIsProcessingFile(false);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -224,7 +305,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
   const currentQr = student.qr_code_id || '';
   const isCurrently32Chars = currentQr.length === 32;
   const activeInput = manualInput || scannedToken;
-  const isInput32Chars = activeInput.trim().length === 32;
+  const isInputValid = activeInput.trim().length >= 4;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-oxford-900/80 backdrop-blur-sm animate-fade-in">
@@ -240,7 +321,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
                 Bind Physical Student ID Card
               </h2>
               <p className="text-xs text-slate-300">
-                Link Existing 32-Character QR Codes to Student Account
+                Link Any Physical Card QR / Barcode to Student Account
               </p>
             </div>
           </div>
@@ -256,9 +337,9 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-5">
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-4">
           {/* Student Target Summary */}
-          <div className="bg-oxford-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-3">
+          <div className="bg-oxford-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between gap-3">
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
                 Target Student
@@ -275,7 +356,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
               <span className="text-[10px] text-slate-500 block">Current Bound ID:</span>
               <span
                 className={`text-xs font-mono font-bold px-2 py-0.5 rounded border inline-block mt-0.5 ${
-                  isCurrently32Chars
+                  currentQr
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                     : 'bg-slate-100 text-slate-700 border-slate-300'
                 }`}
@@ -306,37 +387,61 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
                 muted
                 className="w-full h-full object-cover"
               />
-              <canvas ref={canvasRef} className="hidden" />
 
-              {/* Torch Button */}
-              {hasTorch && scannerActive && (
-                <button
-                  type="button"
-                  onClick={toggleTorch}
-                  className={`absolute top-2 right-2 z-20 p-2 rounded-xl backdrop-blur-md transition ${
-                    isTorchOn
-                      ? 'bg-amber-400 text-oxford-950 shadow-md ring-2 ring-amber-300'
-                      : 'bg-black/60 text-white/80 hover:text-white'
-                  }`}
-                  title={isTorchOn ? 'Turn Flashlight Off' : 'Turn Flashlight On (Anti-Glare)'}
-                >
-                  {isTorchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
-                </button>
-              )}
+              {/* Torch & Zoom Controls */}
+              <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5">
+                {hasZoom && scannerActive && (
+                  <button
+                    type="button"
+                    onClick={toggleZoom}
+                    className={`p-2 rounded-xl backdrop-blur-md transition text-xs font-bold ${
+                      currentZoom > 1
+                        ? 'bg-teal-brand text-oxford-950 shadow-md ring-2 ring-teal-300'
+                        : 'bg-black/60 text-white/90 hover:text-white'
+                    }`}
+                    title="Toggle 2x Macro Zoom"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                )}
+
+                {hasTorch && scannerActive && (
+                  <button
+                    type="button"
+                    onClick={toggleTorch}
+                    className={`p-2 rounded-xl backdrop-blur-md transition ${
+                      isTorchOn
+                        ? 'bg-amber-400 text-oxford-950 shadow-md ring-2 ring-amber-300'
+                        : 'bg-black/60 text-white/90 hover:text-white'
+                    }`}
+                    title={isTorchOn ? 'Turn Flashlight Off' : 'Turn Flashlight On (Anti-Glare)'}
+                  >
+                    {isTorchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>
 
               {/* Targeting Reticle & Scan Laser */}
               {scannerActive && !scannedToken && (
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="relative w-44 h-44 rounded-xl border-2 border-dashed border-teal-brand/70 shadow-lg">
-                    {/* Corner Reticle Accents */}
+                  <div className="relative w-44 h-44 rounded-xl border-2 border-dashed border-teal-brand/80 shadow-[0_0_15px_rgba(20,184,166,0.3)]">
                     <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-2 border-l-2 border-teal-brand" />
                     <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-2 border-r-2 border-teal-brand" />
                     <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-2 border-l-2 border-teal-brand" />
                     <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-2 border-r-2 border-teal-brand" />
 
-                    {/* Animated Scanning Laser Line */}
                     <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-teal-300 to-transparent shadow-[0_0_8px_#14b8a6] animate-pulse top-1/2 -translate-y-1/2" />
                   </div>
+                </div>
+              )}
+
+              {/* Status pulse */}
+              {scannerActive && !scannedToken && (
+                <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none">
+                  <span className="bg-black/70 backdrop-blur-sm text-teal-300 text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-full border border-teal-brand/30 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-ping" />
+                    {scanStatus}
+                  </span>
                 </div>
               )}
 
@@ -356,22 +461,45 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
             </div>
           </div>
 
+          {/* Snap Photo Fallback */}
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleImageCapture}
+              className="hidden"
+            />
+            <button
+              type="button"
+              disabled={isProcessingFile}
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-teal-brand/10 hover:bg-teal-brand/20 text-teal-dark text-xs font-bold border border-teal-brand/30 transition shadow-2xs disabled:opacity-50"
+            >
+              {isProcessingFile ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-teal-brand" />
+              ) : (
+                <Camera className="w-4 h-4 text-teal-brand" />
+              )}
+              <span>
+                {isProcessingFile
+                  ? 'Processing Card Photo...'
+                  : 'Snap with Phone Camera / Upload Photo'}
+              </span>
+            </button>
+          </div>
+
           {/* Manual Input or Scanned Result Display */}
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-700 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Keyboard className="w-4 h-4 text-teal-brand" />
-                Scanned QR Code Token (or enter/paste manually):
+                Scanned Card Token (or enter/paste manually):
               </span>
               {activeInput && (
-                <span
-                  className={`text-[11px] font-mono px-2 py-0.5 rounded font-bold ${
-                    isInput32Chars
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-amber-100 text-amber-800'
-                  }`}
-                >
-                  {activeInput.trim().length} Characters {isInput32Chars && '✓ 32-char Match'}
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800">
+                  {activeInput.trim().length} Characters
                 </span>
               )}
             </label>
@@ -379,7 +507,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="e.g. a7f9c2d4e8b10f3a6e5d8c7b9a0f1e2d"
+                placeholder="e.g. paste or type exact card characters..."
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
                 className="flex-1 text-xs font-mono font-bold px-3 py-2.5 border border-slate-300 rounded-xl focus:border-teal-brand focus:ring-1 focus:ring-teal-brand outline-none bg-white"
@@ -424,12 +552,12 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
           )}
 
           {/* Explanation Info Box */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-600 flex items-start gap-2.5">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600 flex items-start gap-2.5">
             <ShieldCheck className="w-4 h-4 text-teal-brand mt-0.5 shrink-0" />
             <div className="space-y-1">
               <p className="font-semibold text-oxford-800">Card Verification Security:</p>
               <p className="text-slate-500 leading-relaxed">
-                Once bound, the student can simply present their existing physical ID card in class. The Course Representative's scanner will instantly recognise their 32-character token and verify attendance without requiring GPS coordinates or a mobile phone!
+                Once bound, the student presents their physical card in class. The Course Representative's scanner instantly recognises their exact embedded code and records attendance!
               </p>
             </div>
           </div>
@@ -438,7 +566,7 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
         {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
           <span className="text-xs text-slate-500">
-            {isCurrently32Chars ? 'Card already bound' : 'Unbound / Default ID'}
+            {currentQr ? 'Card linked' : 'No card linked yet'}
           </span>
           <button
             onClick={() => {
