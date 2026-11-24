@@ -16,7 +16,12 @@ import {
 import { Student, UserProfile, Department } from '../types';
 import { aegisStore } from '../lib/supabase';
 import { playSuccessChime } from '../lib/qrHelper';
-import { decodeVideoFrame, decodeImageFile } from '../lib/fastScanner';
+import {
+  decodeVideoFrame,
+  decodeImageFile,
+  applyOptimalCameraConstraints,
+  triggerTapToFocus
+} from '../lib/fastScanner';
 
 interface BindIdCardModalProps {
   isOpen: boolean;
@@ -92,8 +97,8 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
         audio: false,
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
         }
       };
 
@@ -102,24 +107,10 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
 
       const track = stream.getVideoTracks()[0];
       if (track) {
-        try {
-          const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-          setHasTorch(Boolean(caps.torch));
-          setHasZoom(Boolean(caps.zoom));
-
-          const adv: any = {};
-          if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-            adv.focusMode = 'continuous';
-          }
-          if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
-            adv.whiteBalanceMode = 'continuous';
-          }
-          if (Object.keys(adv).length > 0 && track.applyConstraints) {
-            await track.applyConstraints({ advanced: [adv] as any });
-          }
-        } catch (e) {
-          console.warn('Track constraint error:', e);
-        }
+        const hw = await applyOptimalCameraConstraints(track, 1.5);
+        setHasTorch(hw.hasTorch);
+        setHasZoom(hw.hasZoom);
+        setCurrentZoom(hw.appliedZoom);
       }
 
       if (videoRef.current) {
@@ -385,7 +376,8 @@ export const BindIdCardModal: React.FC<BindIdCardModalProps> = ({
                 ref={videoRef}
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                onClick={() => triggerTapToFocus(mediaStreamRef.current)}
+                className="w-full h-full object-cover cursor-crosshair"
               />
 
               {/* Torch & Zoom Controls */}

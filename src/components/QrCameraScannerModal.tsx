@@ -14,7 +14,12 @@ import {
   ZapOff
 } from 'lucide-react';
 import { parseScannedStudentQr, parseScannedSessionQr, playSuccessChime } from '../lib/qrHelper';
-import { decodeVideoFrame, decodeImageFile } from '../lib/fastScanner';
+import {
+  decodeVideoFrame,
+  decodeImageFile,
+  applyOptimalCameraConstraints,
+  triggerTapToFocus
+} from '../lib/fastScanner';
 import { aegisStore } from '../lib/supabase';
 import { AttendanceSubmissionResult } from '../types';
 
@@ -189,8 +194,8 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
         ? { deviceId: { exact: selectedCameraId } }
         : {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
           };
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -200,26 +205,11 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
 
       mediaStreamRef.current = stream;
 
-      // Check capabilities & apply continuous autofocus
+      // Check capabilities & apply continuous autofocus + gentle macro zoom for student cards
       const track = stream.getVideoTracks()[0];
       if (track) {
-        try {
-          const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-          setHasTorch(Boolean(caps.torch));
-
-          const adv: any = {};
-          if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-            adv.focusMode = 'continuous';
-          }
-          if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
-            adv.whiteBalanceMode = 'continuous';
-          }
-          if (Object.keys(adv).length > 0 && track.applyConstraints) {
-            await track.applyConstraints({ advanced: [adv] as any });
-          }
-        } catch (e) {
-          console.warn('Track constraint error:', e);
-        }
+        const hw = await applyOptimalCameraConstraints(track, mode === 'scan_student' ? 1.35 : 1.0);
+        setHasTorch(hw.hasTorch);
       }
 
       if (videoRef.current) {
@@ -428,7 +418,8 @@ export const QrCameraScannerModal: React.FC<QrCameraScannerModalProps> = ({
               playsInline
               muted
               autoPlay
-              className="w-full h-full object-cover"
+              onClick={() => triggerTapToFocus(mediaStreamRef.current)}
+              className="w-full h-full object-cover cursor-crosshair"
             />
 
             {/* Hidden canvas for image extraction */}

@@ -13,7 +13,12 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { parseScannedStudentQr, playSuccessChime } from '../lib/qrHelper';
-import { decodeVideoFrame, decodeImageFile } from '../lib/fastScanner';
+import {
+  decodeVideoFrame,
+  decodeImageFile,
+  applyOptimalCameraConstraints,
+  triggerTapToFocus
+} from '../lib/fastScanner';
 import { parseMatricNumber } from '../lib/matricHelper';
 
 export interface ScannedIdCardResult {
@@ -112,8 +117,8 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
         audio: false,
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
         }
       };
 
@@ -122,25 +127,10 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
 
       const track = stream.getVideoTracks()[0];
       if (track) {
-        try {
-          const caps = (track.getCapabilities ? track.getCapabilities() : {}) as any;
-          setHasTorch(Boolean(caps.torch));
-          setHasZoom(Boolean(caps.zoom));
-
-          // Apply hardware continuous autofocus and white balance for sharp plastic card detection
-          const adv: any = {};
-          if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-            adv.focusMode = 'continuous';
-          }
-          if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
-            adv.whiteBalanceMode = 'continuous';
-          }
-          if (Object.keys(adv).length > 0 && track.applyConstraints) {
-            await track.applyConstraints({ advanced: [adv] as any });
-          }
-        } catch (e) {
-          console.warn('Could not apply advanced track constraints:', e);
-        }
+        const hw = await applyOptimalCameraConstraints(track, 1.5);
+        setHasTorch(hw.hasTorch);
+        setHasZoom(hw.hasZoom);
+        setCurrentZoom(hw.appliedZoom);
       }
 
       if (videoRef.current) {
@@ -338,7 +328,8 @@ export const DirectCardScannerModal: React.FC<DirectCardScannerModalProps> = ({
               ref={videoRef}
               playsInline
               muted
-              className="w-full h-full object-cover"
+              onClick={() => triggerTapToFocus(mediaStreamRef.current)}
+              className="w-full h-full object-cover cursor-crosshair"
             />
 
             {/* Quick Action Overlays (Torch & Zoom) */}
